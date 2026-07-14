@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Alvin's Club Bug Management Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=asset_version) }}">
+</head>
+<body class="login-page-body">
+    <main class="login-page-main">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <section class="message-stack login-message-stack">
+                    {% for category, message in messages %}
+                        <div class="message {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </section>
+            {% endif %}
+        {% endwith %}
+
+        <section class="login-wrap">
+            <div class="login-card login-card-modern">
+                <div class="login-brand">
+                    <h1>Alvin's Club</h1>
+                    <p>Bug Management Platform</p>
+                </div>
+
+                <form method="post" class="login-form login-form-modern">
+                    <div class="login-field-row">
+                        <label class="login-field-label" for="login-username">
+                            <span class="login-required-star">*</span>
+                            <span>Username</span>
+                        </label>
+                        <div class="login-input-wrap" data-login-focus="login-username">
+                            <input id="login-username" type="text" name="username" placeholder="Enter username" autocomplete="username" autocapitalize="off" autocorrect="off" required>
+                        </div>
+                    </div>
+
+                    <div class="login-field-row">
+                        <label class="login-field-label" for="login-password">
+                            <span class="login-required-star">*</span>
+                            <span>Password</span>
+                        </label>
+                        <div class="login-input-wrap login-password-wrap" data-login-focus="login-password">
+                            <input id="login-password" type="password" name="password" placeholder="Enter password" autocomplete="current-password" required>
+                            <button class="login-password-toggle" type="button" data-password-toggle aria-label="显示密码" aria-pressed="false">
+                                <span class="eye-icon" aria-hidden="true"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="login-submit-row">
+                        <span class="login-submit-spacer" aria-hidden="true"></span>
+                        <button class="btn login-btn login-btn-modern" type="submit">Login</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </main>
+    <script>
+    document.querySelectorAll(".message-stack .message").forEach(function (item) {
+        window.setTimeout(function () {
+            item.remove();
+            const stack = document.querySelector(".message-stack");
+            if (stack && !stack.children.length) {
+                stack.remove();
+            }
+        }, 2800);
+    });
+
+    document.querySelectorAll("[data-login-focus]").forEach(function (wrap) {
+        const targetId = wrap.dataset.loginFocus;
+        const input = targetId ? document.getElementById(targetId) : null;
+        if (!input) {
+            return;
+        }
+
+        wrap.addEventListener("click", function (event) {
+            if (event.target === input || event.target.closest("[data-password-toggle]")) {
+                return;
+            }
+            window.requestAnimationFrame(function () {
+                input.focus({ preventScroll: true });
+            });
+        });
+    });
+
+    document.querySelectorAll("[data-password-toggle]").forEach(function (button) {
+        const wrap = button.closest("[data-login-focus]");
+        const targetId = wrap ? wrap.dataset.loginFocus : "";
+        const input = targetId ? document.getElementById(targetId) : null;
+        if (!input) {
+            return;
+        }
+
+        button.addEventListener("click", function () {
+            const willShow = input.type === "password";
+            input.type = willShow ? "text" : "password";
+            button.classList.toggle("is-visible", willShow);
+            button.setAttribute("aria-pressed", willShow ? "true" : "false");
+            button.setAttribute("aria-label", willShow ? "隐藏密码" : "显示密码");
+            window.requestAnimationFrame(function () {
+                input.focus({ preventScroll: true });
+                if (typeof input.setSelectionRange === "function") {
+                    const length = input.value.length;
+                    input.setSelectionRange(length, length);
+                }
+            });
+        });
+    });
+    </script>
+</body>
+</html>

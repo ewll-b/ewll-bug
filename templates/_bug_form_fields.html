@@ -1,0 +1,159 @@
+{% set form_values = bug_form_values or {} %}
+{% set selected_platform = form_values.platform or '' %}
+{% set selected_severity = form_values.severity or form_values.priority or '高' %}
+{% set selected_assignee_id = form_values.assignee_id|string if form_values.assignee_id else '' %}
+{% set selected_requirement_id = form_values.requirement_id|string if form_values.requirement_id else '' %}
+{% set selected_case_id = form_values.case_id|string if form_values.case_id else '' %}
+{% set selected_assignee = namespace(value=selected_assignee_id, label='请选择') %}
+{% for user in users %}
+    {% if selected_assignee.value == user.id|string %}
+        {% set selected_assignee.label = user.name ~ ' · ' ~ user.role %}
+    {% endif %}
+{% endfor %}
+{% if selected_assignee.value == '' and users %}
+    {% set selected_assignee.value = users[0].id|string %}
+    {% set selected_assignee.label = users[0].name ~ ' · ' ~ users[0].role %}
+{% endif %}
+{% set selected_requirement = namespace(label='不关联') %}
+{% for item in requirements %}
+    {% if selected_requirement_id == item.id|string %}
+        {% set selected_requirement.label = (item.version or "-") ~ ' / ' ~ item.title %}
+    {% endif %}
+{% endfor %}
+{% set selected_case = namespace(label='不关联') %}
+{% for item in cases %}
+    {% if selected_case_id == item.id|string %}
+        {% set selected_case.label = item.case_no ~ ' / ' ~ item.title %}
+    {% endif %}
+{% endfor %}
+
+<label class="full">
+    <span>标题</span>
+    <input type="text" name="title" value="{{ form_values.title or '' }}" required>
+</label>
+<label>
+    <span>版本</span>
+    <input type="text" name="version" value="{{ form_values.version or '' }}" placeholder="如 2.6.0" required>
+</label>
+<label>
+    <span>端</span>
+    <input id="bug-form-platform" type="hidden" name="platform" value="{{ selected_platform }}">
+    <details class="filter-dropdown admin-select-dropdown bug-form-dropdown">
+        <summary class="filter-select">
+            <span data-filter-label>{{ selected_platform or "请选择" }}</span>
+            <span class="filter-caret"></span>
+        </summary>
+        <div class="filter-menu">
+            <button class="filter-option {% if not selected_platform %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-platform" data-filter-value="" data-filter-label="请选择">请选择</button>
+            {% for platform in bug_platform_options %}
+                <button class="filter-option {% if selected_platform == platform %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-platform" data-filter-value="{{ platform }}" data-filter-label="{{ platform }}">{{ platform }}</button>
+            {% endfor %}
+        </div>
+    </details>
+</label>
+<label>
+    <span>严重级别</span>
+    <input id="bug-form-severity" type="hidden" name="severity" value="{{ selected_severity }}">
+    <details class="filter-dropdown admin-select-dropdown bug-form-dropdown">
+        <summary class="filter-select">
+            <span data-filter-label>{{ selected_severity }}</span>
+            <span class="filter-caret"></span>
+        </summary>
+        <div class="filter-menu">
+            {% for severity in severity_options %}
+                <button class="filter-option {% if selected_severity == severity %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-severity" data-filter-value="{{ severity }}" data-filter-label="{{ severity }}">{{ severity }}</button>
+            {% endfor %}
+        </div>
+    </details>
+</label>
+<label>
+    <span>缺陷处理人</span>
+    <input id="bug-form-assignee" type="hidden" name="assignee_id" value="{{ selected_assignee.value }}">
+    <details class="filter-dropdown admin-select-dropdown bug-form-dropdown">
+        <summary class="filter-select">
+            <span data-filter-label>{{ selected_assignee.label }}</span>
+            <span class="filter-caret"></span>
+        </summary>
+        <div class="filter-menu">
+            {% for user in users %}
+                {% set assignee_label = user.name ~ ' · ' ~ user.role %}
+                <button class="filter-option {% if selected_assignee.value == user.id|string %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-assignee" data-filter-value="{{ user.id }}" data-filter-label="{{ assignee_label }}">{{ assignee_label }}</button>
+            {% endfor %}
+        </div>
+    </details>
+</label>
+<label>
+    <span>关联需求</span>
+    <input id="bug-form-requirement" type="hidden" name="requirement_id" value="{{ selected_requirement_id }}">
+    <details class="filter-dropdown admin-select-dropdown bug-form-dropdown">
+        <summary class="filter-select">
+            <span data-filter-label>{{ selected_requirement.label }}</span>
+            <span class="filter-caret"></span>
+        </summary>
+        <div class="filter-menu">
+            <button class="filter-option {% if not selected_requirement_id %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-requirement" data-filter-value="" data-filter-label="不关联">不关联</button>
+            {% for item in requirements %}
+                {% set requirement_label = (item.version or "-") ~ ' / ' ~ item.title %}
+                <button class="filter-option {% if selected_requirement_id == item.id|string %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-requirement" data-filter-value="{{ item.id }}" data-filter-label="{{ requirement_label }}">{{ requirement_label }}</button>
+            {% endfor %}
+        </div>
+    </details>
+</label>
+<label>
+    <span>关联用例</span>
+    <input id="bug-form-case" type="hidden" name="case_id" value="{{ selected_case_id }}">
+    <details class="filter-dropdown admin-select-dropdown bug-form-dropdown">
+        <summary class="filter-select">
+            <span data-filter-label>{{ selected_case.label }}</span>
+            <span class="filter-caret"></span>
+        </summary>
+        <div class="filter-menu">
+            <button class="filter-option {% if not selected_case_id %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-case" data-filter-value="" data-filter-label="不关联">不关联</button>
+            {% for item in cases %}
+                {% set case_label = item.case_no ~ ' / ' ~ item.title %}
+                <button class="filter-option {% if selected_case_id == item.id|string %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-case" data-filter-value="{{ item.id }}" data-filter-label="{{ case_label }}">{{ case_label }}</button>
+            {% endfor %}
+        </div>
+    </details>
+</label>
+<label class="full">
+    <span>环境信息</span>
+    <input type="text" name="environment" value="{{ form_values.environment or '' }}">
+</label>
+<label class="full">
+    <span>问题描述</span>
+    <textarea name="description" rows="5" required data-paste-image-target="问题描述">{{ form_values.description or '' }}</textarea>
+    <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+</label>
+<label class="full">
+    <span>期望结果</span>
+    <textarea name="expected_result" rows="3" data-paste-image-target="期望结果">{{ form_values.expected_result or '' }}</textarea>
+    <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+</label>
+<label class="full">
+    <span>实际结果</span>
+    <textarea name="actual_result" rows="3" data-paste-image-target="实际结果">{{ form_values.actual_result or '' }}</textarea>
+    <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+</label>
+<label class="full">
+    <span>附件</span>
+    <input type="file" name="attachments" multiple accept="image/*,.log,.txt,.zip,.json" data-paste-file-input>
+    <div class="paste-upload-box" data-paste-upload>
+        <textarea
+            class="paste-capture-input"
+            data-paste-capture
+            rows="1"
+            aria-label="附件粘贴区"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+        ></textarea>
+        <div class="paste-upload-content">
+            <strong>支持直接粘贴图片</strong>
+            <span>在这里按 `Ctrl+V` / `Command+V` 粘贴截图，或继续使用下方附件选择。</span>
+        </div>
+    </div>
+    <div class="paste-file-list" data-paste-file-list hidden></div>
+    <small class="field-tip">支持图片、日志、文本和压缩包，可多选上传，也支持直接粘贴截图。</small>
+</label>

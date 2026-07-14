@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}待办邮箱通知管理 - Alvin's Club Bug Management Platform{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('admin_center') }}">返回Admin</a>
+</div>
+<section class="panel">
+    <div class="panel-head">
+        <div>
+            <h2>待办邮箱通知管理</h2>
+            <div class="head-stats">
+                <span>SMTP 发件邮箱只配置 1 个，用来统一发送系统通知</span>
+                <span>平台每个账号的邮箱为必填，严重 Bug 会即时通知处理人，所有待办会按天汇总发送</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="admin-grid admin-mail-grid">
+        <form class="admin-form" method="post" action="{{ url_for('admin_center') }}">
+            <input type="hidden" name="entity" value="mail">
+            <input type="hidden" name="action" value="update">
+            <input type="hidden" name="next" value="{{ url_for('admin_mail_page') }}">
+            <h3>通知设置</h3>
+            <label>
+                <span>启用状态</span>
+                <select name="enabled">
+                    <option value="1" {% if mail_settings.enabled %}selected{% endif %}>开启</option>
+                    <option value="0" {% if not mail_settings.enabled %}selected{% endif %}>关闭</option>
+                </select>
+            </label>
+            <label>
+                <span>发送时间</span>
+                <input type="time" name="send_time" value="{{ mail_settings.send_time or '10:05' }}">
+            </label>
+            <label>
+                <span>SMTP 主机</span>
+                <input type="text" name="host" value="{{ mail_settings.host }}" placeholder="如 smtp.exmail.qq.com">
+            </label>
+            <label>
+                <span>端口</span>
+                <input type="text" name="port" value="{{ mail_settings.port or '587' }}" placeholder="587 / 465">
+            </label>
+            <label>
+                <span>加密方式</span>
+                <select name="security">
+                    {% for security_code, security_name in mail_security_options %}
+                        <option value="{{ security_code }}" {% if mail_settings.security == security_code %}selected{% endif %}>{{ security_name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>发件人名称</span>
+                <input type="text" name="sender_name" value="{{ mail_settings.sender_name }}" placeholder="Alvin's Club Bug Management Platform">
+            </label>
+            <label>
+                <span>登录账号</span>
+                <input type="text" name="username" value="{{ mail_settings.username }}" placeholder="邮箱账号或 SMTP 用户名">
+            </label>
+            <label>
+                <span>登录密码 / 授权码</span>
+                <input type="text" name="password" value="{{ mail_settings.password }}" placeholder="邮箱授权码">
+            </label>
+            <label class="full">
+                <span>系统发件邮箱</span>
+                <input type="email" name="from_email" value="{{ mail_settings.from_email }}" placeholder="notice@alvinsclub.ai">
+            </label>
+            <div class="admin-mail-meta full">
+                <span>上次发送时间：{{ mail_settings.last_sent_at or "暂无" }}</span>
+                <span>上次结果：{{ mail_settings.last_result or "暂无" }}</span>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary mini" type="submit">保存设置</button>
+            </div>
+        </form>
+
+        <form class="admin-form" method="post" action="{{ url_for('admin_center') }}">
+            <input type="hidden" name="entity" value="mail">
+            <input type="hidden" name="action" value="send_test">
+            <input type="hidden" name="next" value="{{ url_for('admin_mail_page') }}">
+            <h3>立即测试发送</h3>
+            <p class="field-tip">系统会在工作日北京时间 10:05 自动发送待办汇总邮件。这里可以立即手动发一轮，用来验证 SMTP 是否可用。</p>
+            <div class="admin-mail-test-card">
+                <span>发送对象：所有平台账号各自填写的邮箱</span>
+                <span>发送内容：当前待办总数 + 最近待办明细</span>
+                <span>自动规则：工作日北京时间 10:05，有待办才发送；严重 Bug 仍会即时通知处理人</span>
+            </div>
+            <button class="btn btn-secondary mini" type="submit">立即发送测试邮件</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

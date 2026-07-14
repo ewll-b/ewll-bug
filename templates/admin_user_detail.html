@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}账号详情 - AlvinsClubBugManage{% endblock %}
+
+{% block content %}
+{% set selected_account_type = target_user.account_type or ('admin' if (target_user.role_code or '') == 'admin' else 'member') %}
+{% set selected_role_code = target_user.role_code if (target_user.role_code or '') in role_labels else '' %}
+{% set selected_role_name = role_labels.get(selected_role_code, '请选择角色') %}
+{% set selected_account_type_name = '管理员' if selected_account_type == 'admin' else '普通成员' %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('admin_users_page') }}">返回账号管理</a>
+</div>
+<section class="panel admin-detail-panel">
+    <div class="panel-head detail-page-head">
+        <div>
+            <h2>账号详情</h2>
+            <div class="head-stats">
+                <span>ID：{{ target_user.id }}</span>
+                <span>Bug关联数：{{ usage_count }}</span>
+                <span>创建时间：{{ target_user.created_at[:16] if target_user.created_at else "-" }}</span>
+            </div>
+        </div>
+        <div class="head-actions">
+            <form class="admin-delete-form" method="post" action="{{ url_for('admin_center') }}" data-confirm-form data-confirm-title="确认删除账号" data-confirm-message="删除后该账号将无法继续登录，确定继续吗？">
+                <input type="hidden" name="entity" value="user">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="user_id" value="{{ target_user.id }}">
+                <input type="hidden" name="next" value="{{ url_for('admin_users_page') }}">
+                <button class="btn btn-secondary mini danger-btn" type="submit">删除账号</button>
+            </form>
+        </div>
+    </div>
+
+    <form class="form-grid admin-detail-form" method="post" action="{{ url_for('admin_center') }}">
+        <input type="hidden" name="entity" value="user">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="user_id" value="{{ target_user.id }}">
+        <input type="hidden" name="next" value="{{ url_for('admin_user_detail', user_id=target_user.id) }}">
+        <div data-account-type-form class="form-grid full">
+        <label>
+            <span>姓名</span>
+            <input type="text" name="name" value="{{ target_user.name }}" required>
+        </label>
+        <label>
+            <span>账号类型</span>
+            <input id="detail-account-type" type="hidden" name="account_type" value="{{ selected_account_type }}" data-account-type-input>
+            <details class="filter-dropdown admin-select-dropdown" data-account-type-dropdown>
+                <summary class="filter-select">
+                    <span data-filter-label>{{ selected_account_type_name }}</span>
+                    <span class="filter-caret"></span>
+                </summary>
+                <div class="filter-menu">
+                    {% for account_type_code, account_type_name in account_type_options %}
+                        <button class="filter-option {% if selected_account_type == account_type_code %}active{% endif %}" type="button" data-filter-option data-filter-target="detail-account-type" data-filter-value="{{ account_type_code }}" data-filter-label="{{ account_type_name }}">{{ account_type_name }}</button>
+                    {% endfor %}
+                </div>
+            </details>
+        </label>
+        <label data-user-role-field>
+            <span>成员角色</span>
+            <input id="detail-user-role" type="hidden" name="role_code" value="{{ selected_role_code }}" data-user-role-input>
+            <details class="filter-dropdown admin-select-dropdown">
+                <summary class="filter-select">
+                    <span data-filter-label>{{ selected_role_name }}</span>
+                    <span class="filter-caret"></span>
+                </summary>
+                <div class="filter-menu">
+                {% for role_code, role_name in role_options %}
+                    <button class="filter-option {% if selected_role_code == role_code %}active{% endif %}" type="button" data-filter-option data-filter-target="detail-user-role" data-filter-value="{{ role_code }}" data-filter-label="{{ role_name }}">{{ role_name }}</button>
+                {% endfor %}
+                </div>
+            </details>
+        </label>
+        <label>
+            <span>权限说明</span>
+            <input type="text" value="账号类型决定管理权限，成员角色决定业务职责" disabled>
+        </label>
+        <label>
+            <span>账号</span>
+            <input type="text" name="username" value="{{ target_user.username or '' }}" required>
+        </label>
+        <label class="full">
+            <span>邮箱</span>
+            <input type="email" name="email" value="{{ target_user.email or '' }}" placeholder="name@alvinsclub.ai" required>
+        </label>
+        <label class="full">
+            <span>新密码</span>
+            <input type="text" name="password" value="" placeholder="留空则不修改密码">
+        </label>
+        </div>
+        <div class="full admin-detail-actions">
+            <button class="btn btn-primary mini" type="submit">保存修改</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

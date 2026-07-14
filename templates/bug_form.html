@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}新建Bug - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ back_url }}">← 返回上一页</a>
+</div>
+<section class="panel">
+    <div class="panel-head">
+        <h2>新建Bug</h2>
+    </div>
+
+    <form class="form-grid" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="next" value="{{ back_url }}">
+        {% include "_bug_form_fields.html" %}
+        <div class="form-actions full">
+            <button class="btn btn-primary" type="submit">创建Bug</button>
+            <a class="btn btn-secondary" href="{{ back_url }}">返回上一页</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

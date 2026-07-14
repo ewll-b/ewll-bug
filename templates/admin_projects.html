@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}项目管理 - AlvinsClubBugManage{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('admin_center') }}">返回Admin</a>
+</div>
+<section class="panel">
+    <div class="panel-head">
+        <h2>项目管理</h2>
+    </div>
+
+    <div class="admin-grid">
+        <form class="admin-form" method="post" action="{{ url_for('admin_center') }}">
+            <input type="hidden" name="entity" value="project">
+            <input type="hidden" name="action" value="create">
+            <input type="hidden" name="next" value="{{ url_for('admin_projects_page') }}">
+            <h3>创建项目</h3>
+            <label><span>项目名称</span><input type="text" name="name" required></label>
+            <label><span>项目描述</span><input type="text" name="description"></label>
+            <label>
+                <span>默认Bug群通知</span>
+                <input id="create-project-bug-notify-enabled" type="hidden" name="bug_notify_enabled" value="0">
+                <details class="filter-dropdown admin-select-dropdown">
+                    <summary class="filter-select">
+                        <span data-filter-label>关闭</span>
+                        <span class="filter-caret"></span>
+                    </summary>
+                    <div class="filter-menu">
+                        <button class="filter-option active" type="button" data-filter-option data-filter-target="create-project-bug-notify-enabled" data-filter-value="0" data-filter-label="关闭">关闭</button>
+                        <button class="filter-option" type="button" data-filter-option data-filter-target="create-project-bug-notify-enabled" data-filter-value="1" data-filter-label="开启">开启</button>
+                    </div>
+                </details>
+            </label>
+            <label class="full"><span>默认群机器人 Webhook</span><input type="text" name="bug_notify_webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."></label>
+            <label><span>加签 Secret</span><input type="text" name="bug_notify_secret" placeholder="可选"></label>
+            <label><span>平台访问地址</span><input type="text" name="bug_notify_base_url" placeholder="例如 http://192.168.0.161:5050"></label>
+            <button class="btn btn-primary mini" type="submit">创建项目</button>
+        </form>
+
+        <div class="panel sub-panel">
+            <h3>项目列表</h3>
+            <table class="data-table">
+                <thead><tr><th>项目</th><th>描述</th><th>默认Bug群通知</th><th>操作</th></tr></thead>
+                <tbody>
+                    {% for item in projects %}
+                        <tr>
+                            <td><a class="table-link admin-entity-link" href="{{ url_for('admin_project_detail', project_id=item.id) }}">{{ item.name }}</a></td>
+                            <td>{{ item.description or "-" }}</td>
+                            <td>{{ "已开启" if item.bug_notify_enabled else "未开启" }}</td>
+                            <td class="admin-action-cell">
+                                <a class="btn btn-secondary mini" href="{{ url_for('admin_project_detail', project_id=item.id) }}">查看详情</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

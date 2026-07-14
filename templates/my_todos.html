@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}我的待办 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<section class="panel list-page-panel">
+    <div class="list-header-wrap">
+        <div class="list-header single-row-header">
+            <div class="page-title-row">
+                <h2 class="list-page-title">我的待办</h2>
+            </div>
+            <div class="head-stats list-stats">
+                <span>当前待办：{{ summary.my_todo_count }}</span>
+                <span>项目：{{ current_project.name if current_project else '' }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table class="data-table bug-table">
+            <thead>
+                <tr>
+                    <th class="bug-col-no">编号</th>
+                    <th class="bug-col-title">标题</th>
+                    <th class="bug-col-version">版本</th>
+                    <th class="bug-col-severity">严重级别</th>
+                    <th class="bug-col-status">状态</th>
+                    <th class="bug-col-owner">当前处理人</th>
+                    <th class="bug-col-owner">创建人</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in my_todos %}
+                    <tr>
+                        <td>{{ format_bug_no(item.bug_no or item.id) }}</td>
+                        <td class="bug-title-col">
+                            <a class="table-link bug-title-link" href="{{ url_for('bug_detail', bug_id=item.id) }}" title="{{ item.title }}">{{ item.title }}</a>
+                        </td>
+                        <td>{{ item.version or "-" }}</td>
+                        <td><span class="severity-chip severity-{{ item.severity }}">{{ item.severity }}</span></td>
+                        <td>
+                            <form class="inline-status-form" method="post" action="{{ url_for('update_bug', bug_id=item.id) }}">
+                                <input type="hidden" name="action" value="change_status">
+                                <input type="hidden" name="redirect_to" value="{{ url_for('my_todo_page') }}">
+                                <details class="status-dropdown">
+                                    <summary class="status-select status-{{ item.status }}">
+                                        <span>{{ status_labels[item.status] }}</span>
+                                        <span class="status-caret"></span>
+                                    </summary>
+                                    <div class="status-menu">
+                                        {% for code, label in g.status_options %}
+                                            <button class="status-option {% if item.status == code %}active{% endif %}" type="submit" name="status" value="{{ code }}">{{ label }}</button>
+                                        {% endfor %}
+                                    </div>
+                                </details>
+                            </form>
+                        </td>
+                        <td>{{ item.assignee_name }}</td>
+                        <td>{{ item.creator_name }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="7" class="empty-row">当前没有待办</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

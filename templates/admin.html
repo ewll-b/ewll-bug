@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel-head">
+        <div>
+            <h2>Admin 管理端</h2>
+            <div class="head-stats">
+                <span>点击模块进入对应管理页面</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="admin-module-grid">
+        {% for item in admin_cards %}
+            <a class="admin-module-card" href="{{ item.href }}">
+                <div class="admin-module-head">
+                    <h3>{{ item.title }}</h3>
+                    <span class="admin-module-arrow">进入</span>
+                </div>
+                <p>{{ item.desc }}</p>
+                <div class="admin-module-meta">
+                    <span>{{ item.count_label }}</span>
+                    <strong>{{ item.count }}</strong>
+                </div>
+            </a>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

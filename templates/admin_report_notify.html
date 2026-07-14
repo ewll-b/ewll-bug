@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}群测试报告通知 - AlvinsClubBugManage{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('admin_center') }}">返回Admin</a>
+</div>
+<section class="panel">
+    <div class="panel-head">
+        <div>
+            <h2>群测试报告通知</h2>
+            <div class="head-stats">
+                <span>使用飞书 / Lark 群自定义机器人 Webhook 发送测试报告</span>
+                <span>支持按项目、版本和每日发送时间独立配置</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="admin-grid admin-mail-grid">
+        <form class="admin-form" method="post" action="{{ url_for('admin_center') }}">
+            <input type="hidden" name="entity" value="report_notify">
+            <input type="hidden" name="action" value="update">
+            <input type="hidden" name="next" value="{{ url_for('admin_report_notify_page') }}">
+            <h3>通知设置</h3>
+            <p class="field-tip">如果先切换发送项目，再保存一次设置，下面的版本下拉会自动刷新为该项目已有版本。</p>
+            <label>
+                <span>启用状态</span>
+                <select name="enabled">
+                    <option value="1" {% if report_notify_settings.enabled %}selected{% endif %}>开启</option>
+                    <option value="0" {% if not report_notify_settings.enabled %}selected{% endif %}>关闭</option>
+                </select>
+            </label>
+            <label>
+                <span>发送时间</span>
+                <input type="time" name="send_time" value="{{ report_notify_settings.send_time or '18:00' }}">
+            </label>
+            <label class="full">
+                <span>群机器人 Webhook</span>
+                <input type="text" name="webhook_url" value="{{ report_notify_settings.webhook_url }}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
+            </label>
+            <label class="full">
+                <span>机器人密钥（可选）</span>
+                <input type="text" name="secret" value="{{ report_notify_settings.secret }}" placeholder="如果群机器人开启加签，这里填写 secret">
+            </label>
+            <label>
+                <span>发送项目</span>
+                <select name="project_id">
+                    <option value="">请选择项目</option>
+                    {% for project in report_projects %}
+                        <option value="{{ project.id }}" {% if report_notify_settings.project_id == (project.id|string) %}selected{% endif %}>{{ project.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>发送版本</span>
+                <select name="version">
+                    <option value="" {% if not report_notify_settings.version %}selected{% endif %}>全部版本</option>
+                    {% for version in report_versions %}
+                        <option value="{{ version }}" {% if report_notify_settings.version == version %}selected{% endif %}>{{ version }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="full">
+                <span>平台地址（可选）</span>
+                <input type="text" name="base_url" value="{{ report_notify_settings.base_url }}" placeholder="例如 http://192.168.1.10:5050">
+            </label>
+            <div class="admin-mail-meta full">
+                <span>上次发送时间：{{ report_notify_settings.last_sent_at or "暂无" }}</span>
+                <span>上次结果：{{ report_notify_settings.last_result or "暂无" }}</span>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary mini" type="submit">保存设置</button>
+            </div>
+        </form>
+
+        <form class="admin-form" method="post" action="{{ url_for('admin_center') }}">
+            <input type="hidden" name="entity" value="report_notify">
+            <input type="hidden" name="action" value="send_test">
+            <input type="hidden" name="next" value="{{ url_for('admin_report_notify_page') }}">
+            <h3>立即测试发送</h3>
+            <p class="field-tip">系统会按配置的项目与版本，每日固定时间自动向群里发送一份测试报告。这里可以先手动补充备注，再发一条验证机器人是否正常。</p>
+            <div class="admin-mail-test-card">
+                <span>发送对象：当前配置的飞书 / Lark 群机器人</span>
+                <span>发送内容：Bug 汇总、用例执行分布、重点待处理 Bug</span>
+                <span>自动规则：每日 {{ report_notify_settings.send_time or "18:00" }} 发送 1 次</span>
+            </div>
+            <label class="full">
+                <span>手动备注（可选）</span>
+                <textarea name="manual_note" rows="5" placeholder="例如：今天重点验证支付链路，提测包较晚，回归仍在进行中。"></textarea>
+            </label>
+            <button class="btn btn-secondary mini" type="submit">立即发送测试报告</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

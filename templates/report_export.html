@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>测试报告</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap">
+    <style>
+        body { font-family: "Noto Sans SC", "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif; padding: 24px; color: #333; }
+        h1 { margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { border: 1px solid #e5e5e5; padding: 10px; text-align: left; }
+        th { background: #f7f8fa; }
+        .summary { display: flex; gap: 18px; margin: 12px 0; }
+    </style>
+</head>
+<body>
+    <h1>{{ report.project.name if report.project else '' }} 测试报告</h1>
+    <div class="summary">
+        <span>版本：{{ report.selected_version or "全部版本" }}</span>
+        <span>用例总数：{{ report.case_total }}</span>
+        <span>Bug总数：{{ report.summary.total }}</span>
+        <span>待处理：{{ report.summary.active_count }}</span>
+        <span>待验证：{{ report.summary.verification_count }}</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>结果</th>
+                <th>用例数</th>
+                <th>占比</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in report.distribution %}
+                <tr>
+                    <td>{{ item.status }}</td>
+                    <td>{{ item.count }}</td>
+                    <td>{{ item.percent }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}需求管理 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+{% set version_display = namespace(label='版本') %}
+{% if filters.version %}
+    {% set version_display.label = filters.version %}
+{% endif %}
+<section class="panel list-page-panel">
+    <div class="panel-head">
+        <h2>需求管理</h2>
+        <div class="head-stats">
+            <span>项目：{{ current_project.name if current_project else '' }}</span>
+            <span>总数：{{ requirement_summary.total }}</span>
+            <span>需求文档：{{ requirement_summary.requirement_doc_count }}</span>
+            <span>设计稿：{{ requirement_summary.design_doc_count }}</span>
+            <span>关联Bug：{{ requirement_summary.linked_bug_total }}</span>
+        </div>
+    </div>
+
+    <form class="toolbar compact-toolbar header-toolbar" method="get" action="{{ url_for('requirement_library') }}">
+        <input type="text" name="keyword" value="{{ filters.keyword }}" placeholder="搜索标题/链接">
+        <input id="requirement-filter-version" type="hidden" name="version" value="{{ filters.version }}">
+        <details class="filter-dropdown filter-dropdown-sm">
+            <summary class="filter-select">
+                <span data-filter-label>{{ version_display.label }}</span>
+                <span class="filter-caret"></span>
+            </summary>
+            <div class="filter-menu">
+                <button class="filter-option {% if not filters.version %}active{% endif %}" type="button" data-filter-option data-filter-target="requirement-filter-version" data-filter-value="" data-filter-label="版本">全部版本</button>
+                {% for version in requirement_versions %}
+                    <button class="filter-option {% if filters.version == version %}active{% endif %}" type="button" data-filter-option data-filter-target="requirement-filter-version" data-filter-value="{{ version }}" data-filter-label="{{ version }}">{{ version }}</button>
+                {% endfor %}
+            </div>
+        </details>
+        <button class="btn btn-primary mini" type="submit">筛选</button>
+        <a class="btn btn-secondary mini" href="{{ url_for('requirement_library') }}">重置</a>
+    </form>
+
+    <div class="two-column requirement-page-grid">
+        <form class="admin-form requirement-create-form" method="post" action="{{ url_for('create_requirement') }}">
+            <h3>挂载需求文档</h3>
+            <label><span>需求标题</span><input type="text" name="title" placeholder="如：小需求合集" required></label>
+            <div class="admin-grid">
+                <label><span>版本</span><input type="text" name="version" placeholder="如：2.8.0" required></label>
+                <label><span>需求编号</span><input type="text" name="code" placeholder="可不填，系统自动生成"></label>
+            </div>
+            <label><span>需求文档链接</span><input type="url" name="requirement_doc_link" placeholder="https://..."></label>
+            <label><span>设计稿链接</span><input type="url" name="design_doc_link" placeholder="https://..."></label>
+            <div class="form-actions">
+                <button class="btn btn-primary mini" type="submit">保存需求</button>
+            </div>
+        </form>
+
+        <div class="panel sub-panel">
+            <div class="panel-head">
+                <h3>文档列表</h3>
+                <div class="table-meta">共 {{ requirement_page.total }} 条，当前显示 {{ requirement_page.start_index }} - {{ requirement_page.end_index }}</div>
+            </div>
+
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>标题</th>
+                            <th>版本</th>
+                            <th>需求文档</th>
+                            <th>设计稿</th>
+                            <th>创建人</th>
+                            <th>创建时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in requirements %}
+                            <tr class="requirement-row" data-row-link="{{ url_for('requirement_detail', requirement_id=item.id) }}" tabindex="0">
+                                <td class="requirement-title-cell">
+                                    <a class="table-link requirement-title-link" href="{{ url_for('requirement_detail', requirement_id=item.id) }}" title="{{ item.title }}">{{ item.title }}</a>
+                                </td>
+                                <td>{{ item.version or "-" }}</td>
+                                <td>
+                                    {% if item.requirement_doc_link %}
+                                        <a class="external-link-pill" href="{{ item.requirement_doc_link }}" target="_blank" rel="noopener noreferrer">打开文档</a>
+                                    {% else %}
+                                        <span class="field-tip">未挂载</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if item.design_doc_link %}
+                                        <a class="external-link-pill secondary" href="{{ item.design_doc_link }}" target="_blank" rel="noopener noreferrer">打开设计稿</a>
+                                    {% else %}
+                                        <span class="field-tip">未挂载</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ item.creator_name or "-" }}</td>
+                                <td>{{ item.created_at[:16] if item.created_at else "-" }}</td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="6" class="empty-row">暂无需求文档</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pager page-jump-row">
+                {% if requirement_page.has_prev %}
+                    <a class="btn btn-secondary mini" href="{{ build_requirement_page_url(requirement_page.page - 1, filters) }}">上一页</a>
+                {% endif %}
+                <span>第 {{ requirement_page.page }} / {{ requirement_page.pages }} 页</span>
+                <form class="page-jump-form" method="get" action="{{ build_requirement_jump_url(filters) }}">
+                    <input type="hidden" name="keyword" value="{{ filters.keyword }}">
+                    <input type="hidden" name="version" value="{{ filters.version }}">
+                    <input class="page-jump-input" type="number" name="page" min="1" max="{{ requirement_page.pages }}" value="{{ requirement_page.page }}">
+                    <button class="btn btn-secondary mini" type="submit">跳转</button>
+                </form>
+                {% if requirement_page.has_next %}
+                    <a class="btn btn-secondary mini" href="{{ build_requirement_page_url(requirement_page.page + 1, filters) }}">下一页</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

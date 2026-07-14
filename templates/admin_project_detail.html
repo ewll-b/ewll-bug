@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}项目详情 - AlvinsClubBugManage{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('admin_projects_page') }}">返回项目管理</a>
+</div>
+<section class="panel admin-detail-panel">
+    <div class="panel-head detail-page-head">
+        <div>
+            <h2>项目详情</h2>
+            <div class="head-stats">
+                <span>ID：{{ project.id }}</span>
+                <span>关联总数：{{ usage_count }}</span>
+                <span>默认Bug群通知：{{ "已开启" if project.bug_notify_enabled else "未开启" }}</span>
+                <span>创建时间：{{ project.created_at[:16] if project.created_at else "-" }}</span>
+            </div>
+        </div>
+        <div class="head-actions">
+            <form class="admin-delete-form" method="post" action="{{ url_for('admin_center') }}" data-confirm-form data-confirm-title="确认删除项目" data-confirm-message="删除后将同步清理该项目下关联的 Bug、需求、用例和附件，确定继续吗？">
+                <input type="hidden" name="entity" value="project">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="project_id" value="{{ project.id }}">
+                <input type="hidden" name="next" value="{{ url_for('admin_projects_page') }}">
+                <button class="btn btn-secondary mini danger-btn" type="submit">删除项目</button>
+            </form>
+        </div>
+    </div>
+
+    <form class="form-grid admin-detail-form" method="post" action="{{ url_for('admin_center') }}">
+        <input type="hidden" name="entity" value="project">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="project_id" value="{{ project.id }}">
+        <input type="hidden" name="next" value="{{ url_for('admin_project_detail', project_id=project.id) }}">
+        <label class="full">
+            <span>项目名称</span>
+            <input type="text" name="name" value="{{ project.name }}" required>
+        </label>
+        <label class="full">
+            <span>项目描述</span>
+            <input type="text" name="description" value="{{ project.description or '' }}" placeholder="请输入项目描述">
+        </label>
+        <label>
+            <span>默认Bug群通知</span>
+            <input id="project-bug-notify-enabled" type="hidden" name="bug_notify_enabled" value="{{ 1 if project.bug_notify_enabled else 0 }}">
+            <details class="filter-dropdown admin-select-dropdown">
+                <summary class="filter-select">
+                    <span data-filter-label>{{ "开启" if project.bug_notify_enabled else "关闭" }}</span>
+                    <span class="filter-caret"></span>
+                </summary>
+                <div class="filter-menu">
+                    <button class="filter-option {% if project.bug_notify_enabled %}active{% endif %}" type="button" data-filter-option data-filter-target="project-bug-notify-enabled" data-filter-value="1" data-filter-label="开启">开启</button>
+                    <button class="filter-option {% if not project.bug_notify_enabled %}active{% endif %}" type="button" data-filter-option data-filter-target="project-bug-notify-enabled" data-filter-value="0" data-filter-label="关闭">关闭</button>
+                </div>
+            </details>
+        </label>
+        <label class="full">
+            <span>默认群机器人 Webhook</span>
+            <input type="text" name="bug_notify_webhook" value="{{ project.bug_notify_webhook or '' }}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
+        </label>
+        <label>
+            <span>加签 Secret</span>
+            <input type="text" name="bug_notify_secret" value="{{ project.bug_notify_secret or '' }}" placeholder="如果群机器人开启加签，这里填写 secret">
+        </label>
+        <label>
+            <span>平台访问地址</span>
+            <input type="text" name="bug_notify_base_url" value="{{ project.bug_notify_base_url or '' }}" placeholder="例如 http://192.168.0.161:5050">
+        </label>
+        <div class="admin-mail-meta full">
+            <span>默认群上次通知时间：{{ project.bug_notify_last_sent_at or "暂无" }}</span>
+            <span>上次结果：{{ project.bug_notify_last_result or "暂无" }}</span>
+        </div>
+        <div class="full">
+            <h3>模块 / 端机器人</h3>
+            <p class="field-tip">新建 Bug 时按端匹配机器人；APP 包含 Android、iOS、双端，未开启时使用默认群机器人。</p>
+            <table class="data-table bug-notify-rules-table">
+                <thead>
+                    <tr>
+                        <th>模块 / 端</th>
+                        <th>启用</th>
+                        <th>Webhook</th>
+                        <th>Secret</th>
+                        <th>上次结果</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in bug_notify_rules %}
+                        <tr>
+                            <td>{{ rule.label }}</td>
+                            <td>
+                                <input id="bug-notify-rule-enabled-{{ rule.module }}" type="hidden" name="bug_notify_rule_enabled_{{ rule.module }}" value="{{ 1 if rule.enabled else 0 }}">
+                                <details class="filter-dropdown filter-dropdown-sm bug-notify-enabled-dropdown">
+                                    <summary class="filter-select">
+                                        <span data-filter-label>{{ "开启" if rule.enabled else "关闭" }}</span>
+                                        <span class="filter-caret"></span>
+                                    </summary>
+                                    <div class="filter-menu">
+                                        <button class="filter-option {% if rule.enabled %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-notify-rule-enabled-{{ rule.module }}" data-filter-value="1" data-filter-label="开启">开启</button>
+                                        <button class="filter-option {% if not rule.enabled %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-notify-rule-enabled-{{ rule.module }}" data-filter-value="0" data-filter-label="关闭">关闭</button>
+                                    </div>
+                                </details>
+                            </td>
+                            <td>
+                                <input type="text" name="bug_notify_rule_webhook_{{ rule.module }}" value="{{ rule.webhook_url }}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
+                            </td>
+                            <td>
+                                <input type="text" name="bug_notify_rule_secret_{{ rule.module }}" value="{{ rule.secret }}" placeholder="可选">
+                            </td>
+                            <td>
+                                <span>{{ rule.last_sent_at or "暂无" }}</span><br>
+                                <small class="field-tip">{{ rule.last_result or "暂无" }}</small>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="full admin-detail-actions">
+            <button class="btn btn-primary mini" type="submit">保存修改</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

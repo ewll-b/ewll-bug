@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+
+{% block title %}在线文档 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('case_library', document_id=case_document.id) }}">返回用例库</a>
+</div>
+<form id="case-document-form" method="post" action="{{ url_for('update_case_document', document_id=case_document.id) }}">
+    <section class="panel document-shell">
+        <div class="panel-head">
+            <div>
+                <h2>{{ case_document.doc_name }}</h2>
+                <div class="head-stats">
+                    <span>版本：{{ case_document.version or "-" }}</span>
+                    <span>目录：{{ case_document.folder_name or "测试用例" }}</span>
+                    <span>所有者：{{ case_document.creator_name or owner_name }}</span>
+                </div>
+            </div>
+            {% if can_edit_execution %}
+                <div class="header-actions document-toolbar">
+                    <button class="btn btn-secondary mini" type="submit" name="document_action" value="add_row">新增行</button>
+                    <div class="document-column-add">
+                        <input type="text" name="new_column_name" value="" placeholder="输入列名后新增列">
+                        <button class="btn btn-secondary mini" type="submit" name="document_action" value="add_column">新增列</button>
+                    </div>
+                    <button class="btn btn-primary mini" type="submit" name="document_action" value="save">保存文档</button>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="document-meta-card">
+            <div>测试环境：{{ case_meta.environment_info or "测试环境" }}</div>
+            <div>测试设备：{{ case_meta.device_info or "iPhone XR / 小米13" }}</div>
+            <div>网络环境：{{ case_meta.network_info or "GuYin" }}</div>
+        </div>
+
+        <div class="table-wrap online-sheet-wrap drag-scroll-wrap" data-drag-scroll>
+            <table class="data-table online-sheet jira-like-table" data-resizable-table="case-document-plain-v1-{{ case_document.id }}">
+                <colgroup>
+                    <col class="sheet-col-case-no" data-column-key="case_no">
+                    <col class="sheet-col-priority" data-column-key="priority_level">
+                    <col class="sheet-col-module" data-column-key="module_name">
+                    <col class="sheet-col-steps" data-column-key="steps">
+                    <col class="sheet-col-expected" data-column-key="expected_result">
+                    <col class="sheet-col-platform" data-column-key="ios_result">
+                    <col class="sheet-col-platform" data-column-key="android_result">
+                    <col class="sheet-col-platform" data-column-key="h5_result">
+                    <col class="sheet-col-remark" data-column-key="remark">
+                    <col class="sheet-col-executor" data-column-key="executor">
+                    {% for column in document_columns %}
+                        <col class="sheet-col-dynamic" data-column-key="dynamic_{{ column.id }}">
+                    {% endfor %}
+                    <col class="sheet-col-action" data-column-key="action">
+                    <col class="sheet-col-bug" data-column-key="bug_no">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th rowspan="2" data-column-key="case_no" data-column-min-width="118">
+                            <span class="table-head-label">测试编号</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th rowspan="2" data-column-key="priority_level" data-column-min-width="72">
+                            <span class="table-head-label">优先级</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th rowspan="2" data-column-key="module_name" data-column-min-width="124">
+                            <span class="table-head-label">所属模块</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th rowspan="2" data-column-key="steps" data-column-min-width="210">
+                            <span class="table-head-label">测试步骤</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th rowspan="2" data-column-key="expected_result" data-column-min-width="210">
+                            <span class="table-head-label">预期结果</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th colspan="3">
+                            <span class="table-head-label">实际结果</span>
+                        </th>
+                        <th rowspan="2" data-column-key="remark" data-column-min-width="116">
+                            <span class="table-head-label">测试备注</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th rowspan="2" data-column-key="executor" data-column-min-width="92">
+                            <span class="table-head-label">执行人</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        {% for column in document_columns %}
+                            <th rowspan="2" data-column-key="dynamic_{{ column.id }}" data-column-min-width="144">
+                                <span class="table-head-label">{{ column.column_name }}</span>
+                                <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                            </th>
+                        {% endfor %}
+                        <th rowspan="2" data-column-key="action" data-column-min-width="86">
+                            <span class="table-head-label">操作</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th rowspan="2" data-column-key="bug_no" data-column-min-width="74">
+                            <span class="table-head-label">Bug号</span>
+                        </th>
+                    </tr>
+                    <tr>
+                        <th data-column-key="ios_result" data-column-min-width="88">
+                            <span class="table-head-label">iOS</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th data-column-key="android_result" data-column-min-width="88">
+                            <span class="table-head-label">Android</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                        <th data-column-key="h5_result" data-column-min-width="88">
+                            <span class="table-head-label">H5</span>
+                            <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in document_cases %}
+                        <tr data-case-row="{{ item.id }}">
+                            <td class="sheet-fill-cell">
+                                {% if can_edit_execution %}
+                                    <input class="sheet-inline-input sheet-inline-input-sm" type="text" name="case_no_{{ item.id }}" value="{{ item.case_no or '' }}" placeholder="测试编号">
+                                {% else %}
+                                    <div class="sheet-static-block">{{ item.case_no or "-" }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-fill-cell">
+                                {% if can_edit_execution %}
+                                    <input class="sheet-inline-input sheet-inline-input-xs" type="text" name="priority_level_{{ item.id }}" value="{{ item.priority_level or '' }}" placeholder="P0/P1">
+                                {% else %}
+                                    <div class="sheet-static-block">{{ item.priority_level or "-" }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-fill-cell">
+                                {% if can_edit_execution %}
+                                    <input class="sheet-inline-input" type="text" name="module_name_{{ item.id }}" value="{{ item.module_name or '' }}" placeholder="所属模块">
+                                {% else %}
+                                    <div class="sheet-static-block">{{ item.module_name or "-" }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-text">
+                                {% if can_edit_execution %}
+                                    <textarea class="sheet-inline-textarea" name="steps_{{ item.id }}" rows="1" data-sheet-autosize placeholder="测试步骤">{{ item.steps or '' }}</textarea>
+                                {% else %}
+                                    <div class="sheet-static-block sheet-static-multiline">{{ item.steps or "-" }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-text">
+                                {% if can_edit_execution %}
+                                    <textarea class="sheet-inline-textarea" name="expected_result_{{ item.id }}" rows="1" data-sheet-autosize placeholder="预期结果">{{ item.expected_result or '' }}</textarea>
+                                {% else %}
+                                    <div class="sheet-static-block sheet-static-multiline">{{ item.expected_result or "-" }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-result-cell">
+                                {% if can_edit_execution %}
+                                    <select class="sheet-result-select result-{{ item.ios_result or 'empty' }}" name="ios_result_{{ item.id }}" onchange="this.className='sheet-result-select result-' + (this.value || 'empty')">
+                                        {% for option in platform_result_options %}
+                                            <option value="{{ option }}" {% if item.ios_result == option %}selected{% endif %}>{{ option or '-' }}</option>
+                                        {% endfor %}
+                                    </select>
+                                {% else %}
+                                    <div class="sheet-result-display result-{{ item.ios_result or 'empty' }}">{{ item.ios_result or '-' }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-result-cell">
+                                {% if can_edit_execution %}
+                                    <select class="sheet-result-select result-{{ item.android_result or 'empty' }}" name="android_result_{{ item.id }}" onchange="this.className='sheet-result-select result-' + (this.value || 'empty')">
+                                        {% for option in platform_result_options %}
+                                            <option value="{{ option }}" {% if item.android_result == option %}selected{% endif %}>{{ option or '-' }}</option>
+                                        {% endfor %}
+                                    </select>
+                                {% else %}
+                                    <div class="sheet-result-display result-{{ item.android_result or 'empty' }}">{{ item.android_result or '-' }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-result-cell">
+                                {% if can_edit_execution %}
+                                    <select class="sheet-result-select result-{{ item.h5_result or 'empty' }}" name="h5_result_{{ item.id }}" onchange="this.className='sheet-result-select result-' + (this.value || 'empty')">
+                                        {% for option in platform_result_options %}
+                                            <option value="{{ option }}" {% if item.h5_result == option %}selected{% endif %}>{{ option or '-' }}</option>
+                                        {% endfor %}
+                                    </select>
+                                {% else %}
+                                    <div class="sheet-result-display result-{{ item.h5_result or 'empty' }}">{{ item.h5_result or '-' }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-fill-cell">
+                                {% if can_edit_execution %}
+                                    <input class="sheet-remark" type="text" name="remark_{{ item.id }}" value="{{ item.remark or '' }}" placeholder="测试备注">
+                                {% else %}
+                                    <div class="sheet-static-block">{{ item.remark or "-" }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="sheet-fill-cell">
+                                {% if can_edit_execution %}
+                                    <input class="sheet-inline-input" type="text" name="executor_{{ item.id }}" value="{{ item.executor or '' }}" placeholder="执行人">
+                                {% else %}
+                                    <div class="sheet-static-block">{{ item.executor or "-" }}</div>
+                                {% endif %}
+                            </td>
+                            {% for column in document_columns %}
+                                <td class="sheet-text">
+                                    {% set dynamic_value = item.dynamic_values.get(column.id, '') %}
+                                    {% if can_edit_execution %}
+                                        <textarea class="sheet-inline-textarea" name="dynamic_{{ column.id }}_{{ item.id }}" rows="1" data-sheet-autosize placeholder="{{ column.column_name }}">{{ dynamic_value }}</textarea>
+                                    {% else %}
+                                        <div class="sheet-static-block sheet-static-multiline">{{ dynamic_value or "-" }}</div>
+                                    {% endif %}
+                                </td>
+                            {% endfor %}
+                            <td class="sheet-action-cell">
+                                <div class="sheet-action-inline">
+                                    <a class="sheet-action-link" href="{{ url_for('create_bug', case_id=item.id, next=url_for('case_document_detail', document_id=case_document.id)) }}">创建Bug</a>
+                                    {% if can_manage_document %}
+                                        <form class="sheet-action-inline-form" method="post" action="{{ url_for('delete_case_item_route', document_id=case_document.id, case_id=item.id) }}" data-confirm-form data-confirm-title="确认删除用例" data-confirm-message="删除后该用例会从在线文档中移除，已关联 Bug 会自动解除关联，确定继续吗？">
+                                            <button class="sheet-action-link danger" type="submit">删除</button>
+                                        </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td class="sheet-bug-cell">
+                                {% if item.linked_bugs %}
+                                    <div class="sheet-bug-links">
+                                        {% for bug in item.linked_bugs %}
+                                            <a
+                                                class="sheet-bug-link"
+                                                href="{{ url_for('bug_detail', bug_id=bug.id, next=url_for('case_document_detail', document_id=case_document.id)) }}"
+                                                title="{{ bug.title or ('Bug ' ~ format_bug_no(bug.bug_no or bug.id)) }}"
+                                            >
+                                                {{ format_bug_no(bug.bug_no or bug.id) }}
+                                            </a>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <span class="sheet-bug-empty">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</form>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const defaultRowHeight = 24;
+
+    function syncTextareaHeight(textarea) {
+        const row = textarea.closest("tr[data-case-row]");
+        const minHeight = row ? Number(row.dataset.rowHeight || defaultRowHeight) : defaultRowHeight;
+        function syncHeight() {
+            textarea.style.height = "auto";
+            textarea.style.height = Math.max(textarea.scrollHeight, minHeight) + "px";
+        }
+        textarea.addEventListener("input", syncHeight);
+        syncHeight();
+        return syncHeight;
+    }
+
+    document.querySelectorAll("[data-sheet-autosize]").forEach(function (textarea) {
+        syncTextareaHeight(textarea);
+    });
+
+    const table = document.querySelector(".online-sheet[data-resizable-table]");
+    if (!table) {
+        return;
+    }
+
+    Array.from(table.querySelectorAll("tbody tr[data-case-row]")).forEach(function (row) {
+        row.dataset.rowHeight = String(defaultRowHeight);
+        row.style.removeProperty("--sheet-row-height");
+        row.querySelectorAll("[data-sheet-autosize]").forEach(function (textarea) {
+            textarea.style.height = "auto";
+            textarea.style.height = Math.max(textarea.scrollHeight, defaultRowHeight) + "px";
+        });
+    });
+});
+</script>
+{% endblock %}

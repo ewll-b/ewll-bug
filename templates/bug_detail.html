@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+
+{% block title %}缺陷详情 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+{% macro flow_step(bug, code, label, hint, operator_name, completed_statuses, extra_class='') -%}
+    {% set step_state = 'pending' %}
+    {% if bug.status == code %}
+        {% set step_state = 'active' %}
+    {% elif bug.status in completed_statuses %}
+        {% set step_state = 'done' %}
+    {% endif %}
+    <div class="flow-step {{ step_state }} {{ extra_class }}">
+        <div class="flow-step-top">
+            <span class="flow-step-dot"></span>
+            <strong>{{ label }}</strong>
+        </div>
+        <span class="flow-step-hint">{{ hint }}</span>
+        {% if operator_name %}
+            <span class="flow-step-owner">操作人：{{ operator_name }}</span>
+        {% endif %}
+    </div>
+{%- endmacro %}
+{% macro comment_item(item, bug_id, back_url, depth=0) -%}
+    {% set actor_name = item.actor_name or "系统" %}
+    <article class="bug-comment-card {% if depth > 0 %}is-reply{% endif %}" id="comment-{{ item.id }}" data-comment-item>
+        <div class="bug-comment-avatar">{{ actor_name[:1]|upper }}</div>
+        <div class="bug-comment-body">
+            <div class="bug-comment-head">
+                <div class="bug-comment-meta">
+                    <div class="bug-comment-author">
+                        <strong>{{ actor_name }}</strong>
+                    </div>
+                    <time>{{ item.created_at }}</time>
+                </div>
+            </div>
+            <p class="bug-comment-content">{% if item.reply_to_name %}回复 {{ item.reply_to_name }}：{% endif %}{{ item.content }}</p>
+            <div class="bug-comment-actions">
+                <button class="comment-action-link" type="button" data-comment-reply-toggle>回复</button>
+                {% if current_user and (is_admin or item.user_id == current_user.id) %}
+                    <form method="post" action="{{ url_for('delete_bug_comment', bug_id=bug_id, comment_id=item.id) }}" data-confirm-form data-confirm-title="确认删除评论" data-confirm-message="删除后这条评论及其回复会一并移除，确定继续吗？">
+                        <button class="comment-action-link danger" type="submit">删除</button>
+                    </form>
+                {% endif %}
+            </div>
+            <form class="bug-comment-reply-form" method="post" action="{{ url_for('add_bug_comment', bug_id=bug_id) }}" hidden data-comment-reply-box>
+                <input type="hidden" name="parent_id" value="{{ item.id }}">
+                <input type="hidden" name="redirect_to" value="{{ url_for('bug_detail', bug_id=bug_id, tab='detail', next=back_url) }}#comment-{{ item.id }}">
+                <textarea name="content" rows="3" placeholder="回复 {{ actor_name }}..."></textarea>
+                <div class="bug-comment-reply-actions">
+                    <button class="btn btn-primary mini" type="submit">发布回复</button>
+                    <button class="btn btn-secondary mini" type="button" data-comment-reply-cancel>取消</button>
+                </div>
+            </form>
+            {% if item.replies %}
+                <div class="bug-comment-children">
+                    {% for reply in item.replies %}
+                        {{ comment_item(reply, bug_id, back_url, depth + 1) }}
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+    </article>
+{%- endmacro %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ back_url }}">返回上一页</a>
+</div>
+<section class="panel">
+    <div class="panel-head detail-page-head">
+        <h2>缺陷详情</h2>
+        {% if current_user and (is_admin or bug.creator_id == current_user.id) %}
+            <div class="head-actions">
+                {% if request.args.get('edit') == '1' and active_tab == 'detail' %}
+                    <a class="btn btn-secondary mini" href="{{ url_for('bug_detail', bug_id=bug.id, tab='detail', next=back_url) }}">取消编辑</a>
+                {% else %}
+                    <a class="btn btn-primary mini" href="{{ url_for('bug_detail', bug_id=bug.id, tab='detail', edit='1', next=back_url) }}">编辑Bug</a>
+                {% endif %}
+                <form method="post" action="{{ url_for('delete_bug', bug_id=bug.id) }}" data-confirm-form data-confirm-title="确认删除Bug" data-confirm-message="删除后该 Bug、附件和流转历史将一并移除，确定继续吗？">
+                    <button class="btn btn-secondary mini danger-btn" type="submit">删除Bug</button>
+                </form>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="detail-tabs detail-actions">
+        <a class="detail-tab {% if active_tab == 'detail' %}active{% endif %}" href="{{ url_for('bug_detail', bug_id=bug.id, tab='detail', next=back_url) }}">缺陷信息</a>
+        <a class="detail-tab {% if active_tab == 'process' %}active{% endif %}" href="{{ url_for('bug_detail', bug_id=bug.id, tab='process', next=back_url) }}">流转处理</a>
+        <a class="detail-tab {% if active_tab == 'history' %}active{% endif %}" href="{{ url_for('bug_detail', bug_id=bug.id, tab='history', next=back_url) }}">缺陷历史</a>
+    </div>
+
+    {% if active_tab == "detail" and request.args.get('edit') == '1' and current_user and (is_admin or bug.creator_id == current_user.id) %}
+        <form class="form-grid detail-edit-grid" method="post" action="{{ url_for('edit_bug', bug_id=bug.id) }}" enctype="multipart/form-data">
+            <input type="hidden" name="next" value="{{ back_url }}">
+            <label class="full">
+                <span>标题</span>
+                <input type="text" name="title" value="{{ bug.title }}" required>
+            </label>
+            <label>
+                <span>版本</span>
+                <input type="text" name="version" value="{{ bug.version or '' }}" required>
+            </label>
+            <label>
+                <span>端</span>
+                <select name="platform" required>
+                    <option value="">请选择</option>
+                    {% for platform in bug_platform_options %}
+                        <option value="{{ platform }}" {% if bug.platform == platform %}selected{% endif %}>{{ platform }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>严重级别</span>
+                {% if current_user and (is_admin or bug.creator_id == current_user.id) %}
+                    <select name="severity">
+                        {% for severity in severity_options %}
+                            <option value="{{ severity }}" {% if bug.severity == severity %}selected{% endif %}>{{ severity }}</option>
+                        {% endfor %}
+                    </select>
+                {% else %}
+                    <input type="hidden" name="severity" value="{{ bug.severity }}">
+                    <div class="readonly-chip-wrap">
+                        <span class="severity-chip severity-{{ bug.severity }}">{{ bug.severity }}</span>
+                        <small class="field-tip">仅创建人或管理员可修改严重级别</small>
+                    </div>
+                {% endif %}
+            </label>
+            <label>
+                <span>当前处理人</span>
+                <select name="assignee_id">
+                    {% for user in users %}
+                        <option value="{{ user.id }}" {% if bug.assignee_id == user.id %}selected{% endif %}>{{ user.name }} · {{ user.role }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>关联需求</span>
+                <select name="requirement_id">
+                    <option value="">不关联</option>
+                    {% for item in requirements %}
+                        <option value="{{ item.id }}" {% if bug.requirement_id == item.id %}selected{% endif %}>{{ item.version or "-" }} / {{ item.title }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>关联用例</span>
+                <select name="case_id">
+                    <option value="">不关联</option>
+                    {% for item in cases %}
+                        <option value="{{ item.id }}" {% if bug.case_id == item.id %}selected{% endif %}>{{ item.case_no }} / {{ item.title }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="full">
+                <span>环境信息</span>
+                <input type="text" name="environment" value="{{ bug.environment or '' }}">
+            </label>
+            <label class="full">
+                <span>问题描述</span>
+                <textarea name="description" rows="5" required data-paste-image-target="问题描述">{{ bug.description }}</textarea>
+                <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+            </label>
+            <label class="full">
+                <span>期望结果</span>
+                <textarea name="expected_result" rows="3" data-paste-image-target="期望结果">{{ bug.expected_result or '' }}</textarea>
+                <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+            </label>
+            <label class="full">
+                <span>实际结果</span>
+                <textarea name="actual_result" rows="3" data-paste-image-target="实际结果">{{ bug.actual_result or '' }}</textarea>
+                <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+            </label>
+            <label class="full">
+                <span>附件</span>
+                <input type="file" name="attachments" multiple accept="image/*,.log,.txt,.zip,.json" data-paste-file-input>
+                <div class="paste-upload-box" data-paste-upload>
+                    <textarea
+                        class="paste-capture-input"
+                        data-paste-capture
+                        rows="1"
+                        aria-label="附件粘贴区"
+                        autocomplete="off"
+                        autocorrect="off"
+                        autocapitalize="off"
+                        spellcheck="false"
+                    ></textarea>
+                    <div class="paste-upload-content">
+                        <strong>支持直接粘贴图片</strong>
+                        <span>在这里按 `Ctrl+V` / `Command+V` 粘贴截图，或直接在上面的输入框中粘贴图片。</span>
+                    </div>
+                </div>
+                <div class="paste-file-list" data-paste-file-list hidden></div>
+                <small class="field-tip">支持继续补充图片、日志、文本和压缩包。</small>
+            </label>
+            <div class="full detail-edit-attachments">
+                <span>当前附件</span>
+                {% if attachments %}
+                    <div class="attachment-list">
+                        {% for item in attachments %}
+                        <a class="attachment-card compact" href="{{ url_for('view_attachment', attachment_id=item.id) }}" target="_blank" rel="noopener noreferrer" title="{{ item.filename }}">
+                            <div class="attachment-card-main">
+                                <span class="attachment-badge">
+                                    {% if item.content_type and item.content_type.startswith('image/') %}IMG{% else %}FILE{% endif %}
+                                </span>
+                                <div class="attachment-meta">
+                                    <span class="attachment-name">
+                                        {{ item.filename }}
+                                    </span>
+                                    <div class="attachment-submeta">
+                                        <span>{{ item.content_type or "未知类型" }}</span>
+                                        <span>{{ item.created_at }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="field-tip">暂无附件</div>
+                {% endif %}
+            </div>
+            <div class="form-actions full">
+                <button class="btn btn-primary" type="submit">保存修改</button>
+                <a class="btn btn-secondary" href="{{ url_for('bug_detail', bug_id=bug.id, tab='detail', next=back_url) }}">取消</a>
+            </div>
+        </form>
+    {% elif active_tab == "detail" %}
+        <div class="info-grid">
+            <div class="info-item wide"><b>标题</b><span>{{ bug.title }}</span></div>
+            <div class="info-item"><b>编号</b><span>{{ format_bug_no(bug.bug_no or bug.id) }}</span></div>
+            <div class="info-item"><b>创建人</b><span>{{ bug.creator_name }}</span></div>
+            <div class="info-item"><b>当前处理人</b><span>{{ bug.assignee_name }}</span></div>
+            <div class="info-item"><b>创建时间</b><span>{{ bug.created_at }}</span></div>
+            <div class="info-item"><b>更新时间</b><span>{{ bug.updated_at }}</span></div>
+            <div class="info-item"><b>项目</b><span>{{ bug.project_name }}</span></div>
+            <div class="info-item"><b>版本</b><span>{{ bug.version or "-" }}</span></div>
+            <div class="info-item">
+                <b>端</b>
+                <span>
+                    {% if can_edit_bug_platform(bug) %}
+                        <form class="inline-platform-form" method="post" action="{{ url_for('update_bug', bug_id=bug.id) }}">
+                            <input type="hidden" name="action" value="change_platform">
+                            <input type="hidden" name="redirect_to" value="{{ url_for('bug_detail', bug_id=bug.id, tab=active_tab, next=back_url) }}">
+                            <details class="platform-dropdown">
+                                <summary class="platform-select" data-platform-value="{{ bug.platform or '' }}">
+                                    <span>{{ bug.platform or "请选择" }}</span>
+                                    <span class="status-caret"></span>
+                                </summary>
+                                <div class="platform-menu">
+                                    {% for platform in bug_platform_options %}
+                                        <button class="platform-option {% if bug.platform == platform %}active{% endif %}" type="submit" name="platform" value="{{ platform }}" data-platform-value="{{ platform }}">{{ platform }}</button>
+                                    {% endfor %}
+                                </div>
+                            </details>
+                        </form>
+                    {% elif bug.platform %}
+                        <span class="platform-chip" data-platform-value="{{ bug.platform }}">{{ bug.platform }}</span>
+                    {% else %}
+                        -
+                    {% endif %}
+                </span>
+            </div>
+            <div class="info-item"><b>严重级别</b><span><span class="severity-chip severity-{{ bug.severity }}">{{ bug.severity }}</span></span></div>
+            <div class="info-item">
+                <b>状态</b>
+                <span>
+                    <form class="inline-status-form detail-status-form" method="post" action="{{ url_for('update_bug', bug_id=bug.id) }}">
+                        <input type="hidden" name="action" value="change_status">
+                        <input type="hidden" name="redirect_to" value="{{ url_for('bug_detail', bug_id=bug.id, tab=active_tab, next=back_url) }}">
+                        <details class="status-dropdown">
+                            <summary class="status-select status-{{ bug.status }}">
+                                <span>{{ status_labels[bug.status] }}</span>
+                                <span class="status-caret"></span>
+                            </summary>
+                            <div class="status-menu">
+                                {% for code, label in g.status_options %}
+                                    <button class="status-option {% if bug.status == code %}active{% endif %}" type="submit" name="status" value="{{ code }}">{{ label }}</button>
+                                {% endfor %}
+                            </div>
+                        </details>
+                    </form>
+                </span>
+            </div>
+            <div class="info-item"><b>关联需求</b><span>{% if bug.requirement_id %}<a class="table-link" href="{{ url_for('requirement_detail', requirement_id=bug.requirement_id) }}">{{ bug.requirement_title or bug.requirement_code or "-" }}</a><br>{{ bug.requirement_code or "" }}{% else %}-{% endif %}</span></div>
+            <div class="info-item"><b>关联用例</b><span>{{ bug.case_no or "-" }}<br>{{ bug.case_title or "" }}</span></div>
+            <div class="info-item wide"><b>环境信息</b><span>{{ bug.environment or "未填写" }}</span></div>
+            <div class="text-item"><b>详细描述</b><div>{{ bug.description }}</div></div>
+            <div class="text-item"><b>期望结果</b><div>{{ bug.expected_result or "未填写" }}</div></div>
+            <div class="text-item"><b>实际结果</b><div>{{ bug.actual_result or "未填写" }}</div></div>
+            <div class="text-item"><b>解决说明</b><div>{{ bug.resolution_note or "暂无" }}</div></div>
+            <div class="text-item wide"><b>附件</b><div>
+                {% if attachments %}
+                    <div class="attachment-list">
+                        {% for item in attachments %}
+                        <a class="attachment-card compact" href="{{ url_for('view_attachment', attachment_id=item.id) }}" target="_blank" rel="noopener noreferrer" title="{{ item.filename }}">
+                            <div class="attachment-card-main">
+                                <span class="attachment-badge">
+                                    {% if item.content_type and item.content_type.startswith('image/') %}IMG{% else %}FILE{% endif %}
+                                </span>
+                                <div class="attachment-meta">
+                                    <span class="attachment-name">
+                                        {{ item.filename }}
+                                    </span>
+                                    <div class="attachment-submeta">
+                                        <span>{{ item.content_type or "未知类型" }}</span>
+                                        <span>{{ item.created_at }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    暂无附件
+                {% endif %}
+            </div></div>
+        </div>
+
+        <section class="bug-comments-panel" id="bug-comments">
+            <div class="bug-comments-head">
+                <div>
+                    <h3>评论</h3>
+                    <p>记录评论内容、评论人和评论时间，支持对评论进行回复。</p>
+                </div>
+            </div>
+
+            <form class="bug-comment-editor" method="post" action="{{ url_for('add_bug_comment', bug_id=bug.id) }}">
+                <div class="bug-comment-avatar is-current">{{ (current_user.name if current_user else '?')[:1]|upper }}</div>
+                <div class="bug-comment-editor-card">
+                    <input type="hidden" name="redirect_to" value="{{ url_for('bug_detail', bug_id=bug.id, tab='detail', next=back_url) }}#bug-comments">
+                    <textarea name="content" rows="3" placeholder="添加评论..."></textarea>
+                    <div class="bug-comment-editor-actions">
+                        <span class="bug-comment-hint">发布后会显示评论人、评论时间和评论内容。</span>
+                        <button class="btn btn-primary mini" type="submit">发布评论</button>
+                    </div>
+                </div>
+            </form>
+
+            <div class="bug-comment-list">
+                {% for item in comment_threads %}
+                    {{ comment_item(item, bug.id, back_url) }}
+                {% else %}
+                    <div class="bug-comment-empty">暂时还没有评论。</div>
+                {% endfor %}
+            </div>
+        </section>
+    {% elif active_tab == "process" %}
+        <section class="bug-flow-panel">
+            <div class="bug-flow-panel-head">
+                <div>
+                    <h3>缺陷流程图</h3>
+                    <p>按当前平台规则展示 Bug 从创建、处理、验证到关闭、重复或搁置的流转路径。</p>
+                </div>
+                <div class="bug-flow-summary">
+                    <span class="flow-info-tag">当前状态：{{ status_labels[bug.status] }}</span>
+                    <span class="flow-info-tag">当前处理人：{{ bug.assignee_name }}</span>
+                    <span class="flow-info-tag">当前环境：{{ bug.environment or "未填写" }}</span>
+                </div>
+            </div>
+
+            {% set creation_record = history|selectattr('action', 'equalto', '创建缺陷')|list|first %}
+            {% set progress_record = history|selectattr('action', 'equalto', '开始处理')|list|first %}
+            {% set verify_record = history|selectattr('status_snapshot', 'equalto', 'pending_verification')|list|first %}
+            {% set reopen_record = history|selectattr('action', 'equalto', '退回处理')|list|first %}
+            {% set close_record = history|selectattr('action', 'equalto', '关闭缺陷')|list|first %}
+            {% set duplicate_record = history|selectattr('status_snapshot', 'equalto', 'duplicate')|list|first %}
+            {% set hold_record = history|selectattr('status_snapshot', 'equalto', 'on_hold')|list|first %}
+
+            <div class="bug-flow-row">
+                {{ flow_step(bug, "open", "已打开", "创建后进入缺陷处理人待办", creation_record.operator_name if creation_record else bug.creator_name, ["in_progress", "pending_verification", "closed", "duplicate", "on_hold"]) }}
+                <span class="flow-link" aria-hidden="true"></span>
+                {{ flow_step(bug, "in_progress", "处理中", "开发或责任人处理中，必要时可继续流转", progress_record.operator_name if progress_record else reopen_record.operator_name if reopen_record else "", ["pending_verification", "closed", "duplicate", "on_hold"]) }}
+                <span class="flow-link" aria-hidden="true"></span>
+                {{ flow_step(bug, "pending_verification", "待验证", "自动回到创建人待办验证", verify_record.operator_name if verify_record else bug.creator_name, ["closed", "duplicate", "on_hold"]) }}
+                <span class="flow-link" aria-hidden="true"></span>
+                {{ flow_step(bug, "closed", "已关闭", "验证通过后关闭缺陷", close_record.operator_name if close_record else "", []) }}
+            </div>
+
+            <div class="bug-flow-branch">
+                <span class="flow-branch-label">其他结果</span>
+                <div class="bug-flow-branch-track">
+                    <div class="flow-step branch {% if bug.status == 'duplicate' %}active{% else %}pending{% endif %}">
+                        <div class="flow-step-top">
+                            <span class="flow-step-dot"></span>
+                            <strong>重复</strong>
+                        </div>
+                        <span class="flow-step-hint">确认与已有缺陷重复，结束当前记录</span>
+                        {% if duplicate_record %}
+                            <span class="flow-step-owner">操作人：{{ duplicate_record.operator_name }}</span>
+                        {% endif %}
+                    </div>
+                    <span class="flow-link small" aria-hidden="true"></span>
+                    <div class="flow-step branch {% if bug.status == 'on_hold' %}active{% else %}pending{% endif %}">
+                        <div class="flow-step-top">
+                            <span class="flow-step-dot"></span>
+                            <strong>搁置</strong>
+                        </div>
+                        <span class="flow-step-hint">因排期、环境或依赖问题暂缓处理</span>
+                        {% if hold_record %}
+                            <span class="flow-step-owner">操作人：{{ hold_record.operator_name }}</span>
+                        {% endif %}
+                    </div>
+                    <span class="flow-link small" aria-hidden="true"></span>
+                    <div class="flow-step branch note {% if bug.status == 'in_progress' and reopen_record %}active{% endif %}">
+                        <div class="flow-step-top">
+                            <span class="flow-step-dot"></span>
+                            <strong>退回处理</strong>
+                        </div>
+                        <span class="flow-step-hint">
+                            {% if bug.status == 'in_progress' and reopen_record %}
+                                当前已自动退回给 {{ bug.assignee_name }}
+                            {% else %}
+                                待验证未通过时可自动回到上一位处理人的待办
+                            {% endif %}
+                        </span>
+                        {% if reopen_record %}
+                            <span class="flow-step-owner">操作人：{{ reopen_record.operator_name }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <form class="action-form" method="post" action="{{ url_for('update_bug', bug_id=bug.id) }}">
+            <textarea name="resolution_note" rows="4" placeholder="补充处理说明、验证结论或搁置原因"></textarea>
+            <div class="action-row">
+                {% if bug.status == "open" %}
+                    <button class="btn btn-primary mini" type="submit" name="action" value="start_progress">开始处理</button>
+                {% endif %}
+                {% if bug.status == "in_progress" %}
+                    <button class="btn btn-primary mini" type="submit" name="action" value="resolve">提交待验证</button>
+                {% endif %}
+                {% if bug.status == "pending_verification" %}
+                    <button class="btn btn-primary mini" type="submit" name="action" value="close">验证通过并关闭</button>
+                    <button class="btn btn-secondary mini" type="submit" name="action" value="reject">退回处理中</button>
+                {% endif %}
+            </div>
+            <div class="assign-row">
+                <select name="assignee_id">
+                    <option value="">请选择转交处理人</option>
+                    {% for user in users %}
+                        <option value="{{ user.id }}">{{ user.name }} · {{ user.role }}</option>
+                    {% endfor %}
+                </select>
+                <input type="hidden" name="redirect_to" value="{{ url_for('bug_detail', bug_id=bug.id, tab=active_tab, next=back_url) }}">
+                <button class="btn btn-secondary mini" type="submit" name="action" value="reassign">转交处理</button>
+            </div>
+        </form>
+    {% else %}
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>动作</th>
+                        <th>执行人</th>
+                        <th>环境</th>
+                        <th>状态</th>
+                        <th>当前处理人</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in history %}
+                        <tr>
+                            <td>{{ item.created_at }}</td>
+                            <td>{{ item.action }}</td>
+                            <td>{{ item.operator_name }}</td>
+                            <td>{{ item.environment_snapshot or bug.environment or "-" }}</td>
+                            <td>
+                                {% if item.status_snapshot and item.status_snapshot in status_labels %}
+                                    {{ status_labels[item.status_snapshot] }}
+                                {% else %}
+                                    {{ item.status_snapshot or "-" }}
+                                {% endif %}
+                            </td>
+                            <td>{{ item.assignee_snapshot or "-" }}</td>
+                            <td>{{ item.detail }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

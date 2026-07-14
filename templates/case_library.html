@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+
+{% block title %}用例库 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+{% set case_version_display = namespace(label='全部版本') %}
+{% if selected_version %}
+    {% set case_version_display.label = selected_version %}
+{% endif %}
+<section class="panel">
+    <div class="panel-head">
+        <h2>用例库</h2>
+        <div class="head-stats">
+            <span>当前项目：{{ current_project.name if current_project else '' }}</span>
+            <span>在线文档：{{ case_documents|length }}</span>
+        </div>
+    </div>
+
+    <form class="upload-bar" method="post" action="{{ url_for('upload_cases') }}" enctype="multipart/form-data">
+        <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+        <span>上传 Excel 自动生成在线文档</span>
+        <input type="file" name="excel_file" accept=".xlsx,.xlsm,.xltx,.xltm">
+        <button class="btn btn-primary mini" type="submit">上传并同步</button>
+    </form>
+
+    <form class="toolbar compact-toolbar header-toolbar" method="get" action="{{ url_for('case_library') }}">
+        <input id="case-filter-version" type="hidden" name="version" value="{{ selected_version }}">
+        <details class="filter-dropdown filter-dropdown-sm">
+            <summary class="filter-select">
+                <span data-filter-label>{{ case_version_display.label }}</span>
+                <span class="filter-caret"></span>
+            </summary>
+            <div class="filter-menu">
+                <button class="filter-option {% if not selected_version %}active{% endif %}" type="button" data-filter-option data-filter-target="case-filter-version" data-filter-value="" data-filter-label="全部版本">全部版本</button>
+                {% for version in case_versions %}
+                    <button class="filter-option {% if selected_version == version %}active{% endif %}" type="button" data-filter-option data-filter-target="case-filter-version" data-filter-value="{{ version }}" data-filter-label="{{ version }}">{{ version }}</button>
+                {% endfor %}
+            </div>
+        </details>
+        <button class="btn btn-primary mini" type="submit">切换版本</button>
+        <a class="btn btn-secondary mini" href="{{ url_for('case_library') }}">重置</a>
+    </form>
+
+    <div class="case-workspace" data-case-workspace>
+        <aside class="case-sidebar">
+            <div class="case-folder-title">我的文件夹</div>
+            <form class="case-manage-form" method="post" action="{{ url_for('manage_case_library') }}">
+                <input type="hidden" name="action" value="create_folder">
+                <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+                <input type="text" name="folder_name" placeholder="新建文件夹名称">
+                <button class="btn btn-secondary mini" type="submit">新建文件夹</button>
+            </form>
+            <div class="case-folder-tree">
+                {% for folder in case_tree %}
+                    <div class="case-folder-group">
+                        <div class="case-folder-name">{{ folder.name }}</div>
+                        <form class="case-manage-form inline-manage-form" method="post" action="{{ url_for('manage_case_library') }}">
+                            <input type="hidden" name="action" value="create_document">
+                            <input type="hidden" name="folder_name" value="{{ folder.name }}">
+                            <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+                            <input type="text" name="doc_name" placeholder="新建在线文档">
+                            <button class="btn btn-secondary mini" type="submit">新增文档</button>
+                        </form>
+                        {% for item in folder.documents %}
+                            <div class="case-folder-item">
+                                <a class="case-folder-link {% if selected_document and selected_document.id == item.id %}active{% endif %}" href="{{ url_for('case_library', document_id=item.id, version=selected_version) if selected_version else url_for('case_library', document_id=item.id) }}">
+                                    <span>{{ item.doc_name }}</span>
+                                    <small class="case-doc-version">{{ item.version or "未设版本" }}</small>
+                                </a>
+                                {% if current_user and (is_admin or item.creator_id == current_user.id) %}
+                                    <form method="post" action="{{ url_for('manage_case_library') }}" class="case-delete-form" data-confirm-form data-confirm-title="确认删除在线文档" data-confirm-message="删除后该在线文档及其用例数据将被移除，确定继续吗？">
+                                        <input type="hidden" name="action" value="delete_document">
+                                        <input type="hidden" name="document_id" value="{{ item.id }}">
+                                        <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+                                        <button class="case-delete-btn" type="submit">删除</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="empty-row">暂无在线文档</div>
+                {% endfor %}
+            </div>
+        </aside>
+
+        <button class="case-resizer" type="button" aria-label="调整左侧宽度" data-resize-handle="left"></button>
+
+        <div class="case-file-panel">
+            <div class="case-file-toolbar">
+                <div class="case-file-toolbar-title">在线文档列表</div>
+                <div class="case-file-toolbar-time">修改时间</div>
+            </div>
+            <div class="case-file-list">
+                {% for item in case_documents %}
+                    <a class="case-file-row {% if selected_document and selected_document.id == item.id %}active{% endif %}" href="{{ url_for('case_library', document_id=item.id, version=selected_version) if selected_version else url_for('case_library', document_id=item.id) }}">
+                        <div class="case-file-meta">
+                            <span class="case-file-icon">表</span>
+                            <span class="case-file-text">
+                                <span class="case-file-name">{{ item.doc_name }}</span>
+                                <small class="case-doc-version">{{ item.version or "未设版本" }}</small>
+                            </span>
+                        </div>
+                        <span class="case-file-time">{{ item.updated_at[5:16] if item.updated_at else '' }}</span>
+                    </a>
+                {% else %}
+                    <div class="empty-row">暂无在线文档</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <button class="case-resizer" type="button" aria-label="调整右侧宽度" data-resize-handle="right"></button>
+
+        <aside class="case-preview-panel">
+            {% if selected_document %}
+                <div class="case-preview-card">
+                    <div class="case-preview-label">在线文档概览</div>
+                    <h3>{{ selected_document.doc_name }}</h3>
+                    <div class="case-preview-stats">
+                        <span>用例数：{{ selected_document_count }}</span>
+                        <span>版本：{{ selected_document.version or "-" }}</span>
+                        <span>目录：{{ selected_document.folder_name or "测试用例" }}</span>
+                        <span>创建人：{{ selected_document.creator_name or "-" }}</span>
+                    </div>
+                    {% if current_user and (is_admin or selected_document.creator_id == current_user.id) %}
+                        <form class="case-manage-form" method="post" action="{{ url_for('rename_case_document_route', document_id=selected_document.id) }}">
+                            <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+                            <input type="text" name="version" value="{{ selected_document.version or '' }}" placeholder="版本">
+                            <input type="text" name="folder_name" value="{{ selected_document.folder_name or '测试用例' }}" placeholder="目录名称">
+                            <input type="text" name="doc_name" value="{{ selected_document.doc_name }}" placeholder="在线文档名称" required>
+                            <button class="btn btn-secondary mini" type="submit">保存文档名称</button>
+                        </form>
+                    {% endif %}
+                    <a class="btn btn-primary mini" href="{{ url_for('case_document_detail', document_id=selected_document.id) }}" target="case-document-viewer">打开在线文档</a>
+                </div>
+
+                <div class="chart-box case-summary-box">
+                    <h3>执行结果同步统计</h3>
+                    <table class="data-table compact-table">
+                        <thead>
+                            <tr>
+                                <th>结果</th>
+                                <th>数量</th>
+                                <th>占比</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in distribution %}
+                                <tr>
+                                    <td><span class="legend-dot" style="background: {{ item.color }}"></span>{{ item.status }}</td>
+                                    <td>{{ item.count }}</td>
+                                    <td>{{ item.percent }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="empty-row">请选择一个在线文档</div>
+            {% endif %}
+        </aside>
+    </div>
+</section>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const workspace = document.querySelector("[data-case-workspace]");
+    if (!workspace) {
+        return;
+    }
+
+    const storageKey = "case-workspace-layout-v1";
+    const minSidebar = 220;
+    const maxSidebar = 420;
+    const minPreview = 180;
+    const maxPreview = 360;
+
+    const saved = window.localStorage.getItem(storageKey);
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            if (parsed.sidebar) {
+                workspace.style.setProperty("--case-sidebar-width", parsed.sidebar + "px");
+            }
+            if (parsed.preview) {
+                workspace.style.setProperty("--case-preview-width", parsed.preview + "px");
+            }
+        } catch (error) {
+            window.localStorage.removeItem(storageKey);
+        }
+    }
+
+    function persistLayout() {
+        const sidebar = parseInt(getComputedStyle(workspace).getPropertyValue("--case-sidebar-width"), 10);
+        const preview = parseInt(getComputedStyle(workspace).getPropertyValue("--case-preview-width"), 10);
+        window.localStorage.setItem(storageKey, JSON.stringify({ sidebar: sidebar, preview: preview }));
+    }
+
+    function startResize(event, side) {
+        event.preventDefault();
+        const rect = workspace.getBoundingClientRect();
+        const startX = event.clientX;
+        const currentStyle = getComputedStyle(workspace);
+        const startSidebar = parseInt(currentStyle.getPropertyValue("--case-sidebar-width"), 10);
+        const startPreview = parseInt(currentStyle.getPropertyValue("--case-preview-width"), 10);
+
+        function onMove(moveEvent) {
+            const delta = moveEvent.clientX - startX;
+            if (side === "left") {
+                const nextSidebar = Math.max(minSidebar, Math.min(maxSidebar, startSidebar + delta));
+                workspace.style.setProperty("--case-sidebar-width", nextSidebar + "px");
+            } else {
+                const dragFromRight = rect.right - moveEvent.clientX;
+                const startFromRight = rect.right - startX;
+                const nextPreview = Math.max(minPreview, Math.min(maxPreview, startPreview + (dragFromRight - startFromRight)));
+                workspace.style.setProperty("--case-preview-width", nextPreview + "px");
+            }
+        }
+
+        function onUp() {
+            document.removeEventListener("pointermove", onMove);
+            document.removeEventListener("pointerup", onUp);
+            document.body.classList.remove("is-resizing-panels");
+            persistLayout();
+        }
+
+        document.body.classList.add("is-resizing-panels");
+        document.addEventListener("pointermove", onMove);
+        document.addEventListener("pointerup", onUp);
+    }
+
+    workspace.querySelectorAll("[data-resize-handle]").forEach(function (handle) {
+        handle.addEventListener("pointerdown", function (event) {
+            startResize(event, handle.dataset.resizeHandle);
+        });
+    });
+});
+</script>
+{% endblock %}

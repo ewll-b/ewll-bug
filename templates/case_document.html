@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}在线文档 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('case_library', document_id=case_document.id) }}">返回用例库</a>
+</div>
+<section class="panel document-shell">
+    <div class="panel-head">
+        <div>
+            <h2>{{ case_document.doc_name }}</h2>
+            <div class="head-stats">
+                <span>版本：{{ case_document.version or "-" }}</span>
+                <span>目录：{{ case_document.folder_name or "测试用例" }}</span>
+                <span>所有者：{{ case_document.creator_name or owner_name }}</span>
+            </div>
+        </div>
+        {% if current_user and (is_admin or case_document.creator_id == current_user.id) %}
+            <div class="header-actions">
+                <button class="btn btn-primary mini" type="submit" form="case-document-form">保存文档</button>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="document-meta-card">
+        <div>测试环境：{{ case_meta.environment_info or "测试环境" }}</div>
+        <div>测试设备：{{ case_meta.device_info or "iPhone XR / 小米13" }}</div>
+        <div>网络环境：{{ case_meta.network_info or "GuYin" }}</div>
+    </div>
+
+    <form id="case-document-form" method="post" action="{{ url_for('update_case_document', document_id=case_document.id) }}">
+        <div class="table-wrap online-sheet-wrap">
+            <table class="data-table online-sheet">
+                <thead>
+                    <tr>
+                        <th rowspan="2">测试编号</th>
+                        <th rowspan="2">优先级</th>
+                        <th rowspan="2">所属模块</th>
+                        <th rowspan="2">测试步骤</th>
+                        <th rowspan="2">预期结果</th>
+                        <th colspan="3">实际结果</th>
+                        <th rowspan="2">测试备注</th>
+                        <th rowspan="2">执行人</th>
+                    </tr>
+                    <tr>
+                        <th>iOS</th>
+                        <th>Android</th>
+                        <th>H5</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in document_cases %}
+                        <tr>
+                            <td>{{ item.case_no }}</td>
+                            <td>{{ item.priority_level or "-" }}</td>
+                            <td>{{ item.module_name or "-" }}</td>
+                            <td class="sheet-text">{{ item.steps or "-" }}</td>
+                            <td class="sheet-text">{{ item.expected_result or "-" }}</td>
+                            <td>
+                                <select class="sheet-result result-{{ item.ios_result or 'empty' }}" name="ios_result_{{ item.id }}" onchange="this.className='sheet-result result-' + (this.value || 'empty')" {% if not (current_user and (is_admin or case_document.creator_id == current_user.id)) %}disabled{% endif %}>
+                                    {% for option in platform_result_options %}
+                                        <option value="{{ option }}" {% if item.ios_result == option %}selected{% endif %}>{{ option or '-' }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <select class="sheet-result result-{{ item.android_result or 'empty' }}" name="android_result_{{ item.id }}" onchange="this.className='sheet-result result-' + (this.value || 'empty')" {% if not (current_user and (is_admin or case_document.creator_id == current_user.id)) %}disabled{% endif %}>
+                                    {% for option in platform_result_options %}
+                                        <option value="{{ option }}" {% if item.android_result == option %}selected{% endif %}>{{ option or '-' }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <select class="sheet-result result-{{ item.h5_result or 'empty' }}" name="h5_result_{{ item.id }}" onchange="this.className='sheet-result result-' + (this.value || 'empty')" {% if not (current_user and (is_admin or case_document.creator_id == current_user.id)) %}disabled{% endif %}>
+                                    {% for option in platform_result_options %}
+                                        <option value="{{ option }}" {% if item.h5_result == option %}selected{% endif %}>{{ option or '-' }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <input class="sheet-remark" type="text" name="remark_{{ item.id }}" value="{{ item.remark or '' }}" placeholder="测试备注" {% if not (current_user and (is_admin or case_document.creator_id == current_user.id)) %}disabled{% endif %}>
+                            </td>
+                            <td>{{ item.executor or "-" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </form>
+</section>
+{% endblock %}

@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Alvin's Club Bug Management Platform{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=asset_version) }}">
+</head>
+<body
+    class="{% if request.endpoint == 'login' %}login-page-body{% endif %}"
+    data-bug-sync-token="{{ bug_sync_token }}"
+    data-history-refresh="{% if request.endpoint in ['bug_detail', 'bug_list', 'my_todo_page', 'testing_report'] %}1{% else %}0{% endif %}"
+>
+    {% if request.endpoint != 'login' %}
+    <header class="app-header">
+        <div class="container app-header-inner">
+            <div class="brand-block">
+                <div class="brand-row">
+                    <img class="brand-logo" src="{{ url_for('static', filename='logo.png', v=asset_version) }}" alt="Alvin's Club">
+                    <div class="brand-copy">
+                        <h1>Alvin's Club Bug Management Platform</h1>
+                    </div>
+                </div>
+            </div>
+            {% if current_user %}
+                <div class="header-actions">
+                    <div class="header-account-menu">
+                        <details class="account-dropdown">
+                            <summary class="header-account">
+                                <span class="account-meta">
+                                    <strong>{{ current_user.name }}</strong>
+                                    <span>{{ current_user.role }}</span>
+                                </span>
+                                <span class="account-caret"></span>
+                            </summary>
+                            <div class="account-popover">
+                                <div class="account-popover-head">
+                                    <strong>{{ current_user.name }}</strong>
+                                    <span>{{ current_user.email or (current_user.username ~ '@alvinsclub.ai') }}</span>
+                                </div>
+                                <a class="account-popover-link" href="{{ url_for('profile_page') }}">Profile</a>
+                                <a class="account-popover-link logout-link" href="{{ url_for('logout') }}">Logout</a>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </header>
+    {% endif %}
+
+    {% if request.endpoint == 'login' %}
+        <main class="login-page-main">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <section class="message-stack login-message-stack">
+                        {% for category, message in messages %}
+                            <div class="message {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    </section>
+                {% endif %}
+            {% endwith %}
+    {% else %}
+        <div class="container main-layout">
+            {% if current_user %}
+                <aside class="side-nav">
+                    <div class="side-nav-shell">
+                        <form method="post" action="{{ url_for('switch_project') }}" class="project-switch">
+                            <label>项目</label>
+                            <div class="project-switch-shell">
+                                <span class="project-switch-caption">当前项目</span>
+                                <details class="project-switch-dropdown">
+                                    <summary class="project-switch-select">
+                                        <span>{{ current_project.name if current_project else '请选择项目' }}</span>
+                                        <span class="filter-caret"></span>
+                                    </summary>
+                                    <div class="project-switch-menu">
+                                        {% for project in projects %}
+                                            <button class="project-switch-option {% if current_project and current_project.id == project.id %}active{% endif %}" type="submit" name="project_id" value="{{ project.id }}">{{ project.name }}</button>
+                                        {% endfor %}
+                                    </div>
+                                </details>
+                                {% if current_project %}
+                                    <div class="project-current-name">{{ current_project.name }}</div>
+                                {% endif %}
+                            </div>
+                        </form>
+
+                        <nav class="nav-links">
+                            <a class="{% if request.endpoint == 'bug_list' %}active{% endif %}" href="{{ url_for('bug_list') }}">Bug列表</a>
+                            <a class="{% if request.endpoint == 'my_todo_page' %}active{% endif %}" href="{{ url_for('my_todo_page') }}">
+                                <span>我的待办</span>
+                                {% if summary and summary.my_todo_count > 0 %}
+                                    <span class="nav-badge">{{ summary.my_todo_count }}</span>
+                                {% endif %}
+                            </a>
+                            <a class="{% if request.endpoint == 'case_library' %}active{% endif %}" href="{{ url_for('case_library') }}">用例库</a>
+                            <a class="{% if request.endpoint == 'requirement_library' %}active{% endif %}" href="{{ url_for('requirement_library') }}">需求</a>
+                            <a class="{% if request.endpoint == 'testing_report' %}active{% endif %}" href="{{ url_for('testing_report') }}">测试报告</a>
+                            {% if is_admin %}
+                                <a class="{% if request.endpoint in ['admin_center', 'admin_projects_page', 'admin_users_page', 'admin_mail_page', 'admin_report_notify_page', 'admin_project_detail', 'admin_user_detail'] %}active{% endif %}" href="{{ url_for('admin_center') }}">Admin</a>
+                            {% endif %}
+                        </nav>
+                    </div>
+                </aside>
+            {% endif %}
+
+            <main class="content-area">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        <section class="message-stack">
+                            {% for category, message in messages %}
+                                <div class="message {{ category }}">{{ message }}</div>
+                            {% endfor %}
+                        </section>
+                    {% endif %}
+                {% endwith %}
+    {% endif %}
+
+                {% block content %}{% endblock %}
+
+    {% if request.endpoint == 'login' %}
+        </main>
+    {% else %}
+            </main>
+        </div>
+    {% endif %}
+
+    {% if request.endpoint != 'login' %}
+    <div class="confirm-modal" id="confirm-modal" hidden>
+        <div class="confirm-modal-backdrop" data-confirm-cancel></div>
+        <div class="confirm-modal-card" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+            <h3 id="confirm-modal-title">确认删除</h3>
+            <p class="confirm-modal-text" id="confirm-modal-text">确认继续当前操作吗？</p>
+            <div class="confirm-modal-actions">
+                <button class="btn btn-secondary mini" type="button" data-confirm-cancel>取消</button>
+                <button class="btn btn-secondary mini danger-btn" type="button" id="confirm-modal-submit">确认删除</button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</body>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const bugSyncStorageKey = "alvinsclub-bug-sync-token";
+    const pageBugSyncToken = document.body.dataset.bugSyncToken || "";
+    const shouldForceHistoryRefresh = document.body.dataset.historyRefresh === "1";
+    let isReloadingForBugSync = false;
+
+    function isBackForwardNavigation() {
+        if (!window.performance || typeof window.performance.getEntriesByType !== "function") {
+            return false;
+        }
+        const entries = window.performance.getEntriesByType("navigation");
+        return Array.isArray(entries) && entries.some(function (entry) {
+            return entry && entry.type === "back_forward";
+        });
+    }
+
+    function readBugSyncToken() {
+        try {
+            return window.localStorage.getItem(bugSyncStorageKey) || "";
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    function writeBugSyncToken(token) {
+        if (!token) {
+            return;
+        }
+        try {
+            window.localStorage.setItem(bugSyncStorageKey, token);
+        } catch (_error) {
+            return;
+        }
+    }
+
+    function shouldRefreshForBugSync() {
+        const latestToken = readBugSyncToken();
+        return Boolean(pageBugSyncToken && latestToken && latestToken !== pageBugSyncToken);
+    }
+
+    function refreshForBugSync() {
+        if (isReloadingForBugSync) {
+            return;
+        }
+        if (!shouldRefreshForBugSync()) {
+            return;
+        }
+        isReloadingForBugSync = true;
+        window.location.reload();
+    }
+
+    writeBugSyncToken(pageBugSyncToken);
+
+    window.addEventListener("pageshow", function (event) {
+        if (shouldForceHistoryRefresh && !isReloadingForBugSync && (event.persisted || isBackForwardNavigation())) {
+            isReloadingForBugSync = true;
+            window.location.reload();
+            return;
+        }
+        refreshForBugSync();
+    });
+
+    document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") {
+            refreshForBugSync();
+        }
+    });
+
+    window.addEventListener("focus", function () {
+        refreshForBugSync();
+    });
+
+    function showToast(message, category) {
+        if (!message) {
+            return;
+        }
+        let stack = document.querySelector(".message-stack");
+        if (!stack) {
+            stack = document.createElement("section");
+            stack.className = "message-stack";
+            document.body.appendChild(stack);
+        }
+        const item = document.createElement("div");
+        item.className = "message " + (category || "success");
+        item.textContent = message;
+        stack.appendChild(item);
+        window.setTimeout(function () {
+            item.remove();
+            if (!stack.children.length) {
+                stack.remove();
+            }
+        }, 2800);
+    }
+
+    document.querySelectorAll(".message-stack .message").forEach(function (item) {
+        window.setTimeout(function () {
+            item.remove();
+            const stack = document.querySelector(".message-stack");
+            if (stack && !stack.children.length) {
+                stack.remove();
+            }
+        }, 2800);
+    });
+
+    const managedDetailsSelector = [
+        ".filter-dropdown",
+        ".form-choice-dropdown",
+        ".status-dropdown",
+        ".platform-dropdown",
+        ".account-dropdown",
+        ".project-switch-dropdown",
+        ".admin-inline-editor"
+    ].join(", ");
+    const managedDetails = Array.from(document.querySelectorAll(managedDetailsSelector));
+
+    function closeManagedDetails(exceptNode) {
+        managedDetails.forEach(function (dropdown) {
+            if (dropdown !== exceptNode && dropdown.open) {
+                dropdown.open = false;
+            }
+        });
+    }
+
+    managedDetails.forEach(function (dropdown) {
+        dropdown.addEventListener("toggle", function () {
+            if (!dropdown.open) {
+                return;
+            }
+            closeManagedDetails(dropdown);
+        });
+    });
+
+    document.addEventListener("click", function (event) {
+        const clickedElement = event.target instanceof Element ? event.target : null;
+        if (clickedElement && clickedElement.closest(managedDetailsSelector)) {
+            return;
+        }
+        closeManagedDetails(null);
+    });
+
+    document.querySelectorAll("[data-filter-option]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const targetId = button.dataset.filterTarget;
+            const target = targetId ? document.getElementById(targetId) : null;
+            const dropdown = button.closest(".filter-dropdown");
+            if (target) {
+                target.value = button.dataset.filterValue || "";
+            }
+            if (dropdown) {
+                const labelNode = dropdown.querySelector("[data-filter-label]");
+                const summary = dropdown.querySelector("[data-filter-summary]");
+                if (labelNode) {
+                    labelNode.textContent = button.dataset.filterLabel || button.textContent.trim();
+                }
+                if (summary) {
+                    const baseClass = summary.dataset.filterSummaryBase || summary.className;
+                    const nextClass = button.dataset.filterClass || "";
+                    summary.className = [baseClass, nextClass].filter(Boolean).join(" ");
+                }
+                dropdown.querySelectorAll("[data-filter-option]").forEach(function (other) {
+                    other.classList.toggle("active", other === button);
+                });
+                dropdown.open = false;
+            }
+        });
+    });
+
+    document.querySelectorAll("[data-choice-option]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const targetId = button.dataset.choiceTarget;
+            const target = targetId ? document.getElementById(targetId) : null;
+            const dropdown = button.closest(".form-choice-dropdown");
+            if (target) {
+                target.value = button.dataset.choiceValue || "";
+            }
+            if (dropdown) {
+                const labelNode = dropdown.querySelector("[data-choice-label]");
+                const markNode = dropdown.querySelector("[data-choice-mark]");
+                if (labelNode) {
+                    labelNode.textContent = button.dataset.choiceLabel || button.textContent.trim();
+                }
+                if (markNode) {
+                    markNode.textContent = button.dataset.choiceMark || "";
+                    markNode.className = "priority-mark " + (button.dataset.choiceMarkClass || "");
+                }
+                dropdown.querySelectorAll("[data-choice-option]").forEach(function (other) {
+                    other.classList.toggle("active", other === button);
+                });
+                dropdown.open = false;
+            }
+        });
+    });
+
+    document.querySelectorAll("[data-comment-template]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const form = button.closest("form");
+            const textarea = form ? form.querySelector('textarea[name="content"]') : null;
+            if (!textarea) {
+                return;
+            }
+            const template = button.dataset.commentTemplate || "";
+            const currentValue = textarea.value.trim();
+            textarea.value = currentValue ? currentValue + "\n" + template : template;
+            textarea.focus();
+            const cursor = textarea.value.length;
+            if (typeof textarea.setSelectionRange === "function") {
+                textarea.setSelectionRange(cursor, cursor);
+            }
+        });
+    });
+
+    document.querySelectorAll("[data-comment-reply-toggle]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const item = button.closest("[data-comment-item]");
+            const replyBox = item ? item.querySelector("[data-comment-reply-box]") : null;
+            if (!replyBox) {
+                return;
+            }
+            const shouldOpen = replyBox.hidden;
+            document.querySelectorAll("[data-comment-reply-box]").forEach(function (other) {
+                other.hidden = true;
+            });
+            if (!shouldOpen) {
+                replyBox.hidden = true;
+                return;
+            }
+            replyBox.hidden = false;
+            const textarea = replyBox.querySelector('textarea[name="content"]');
+            if (textarea) {
+                textarea.focus();
+            }
+        });
+    });
+
+    document.querySelectorAll("[data-comment-reply-cancel]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const replyBox = button.closest("[data-comment-reply-box]");
+            if (!replyBox) {
+                return;
+            }
+            const textarea = replyBox.querySelector('textarea[name="content"]');
+            if (textarea) {
+                textarea.value = "";
+            }
+            replyBox.hidden = true;
+        });
+    });
+
+    document.querySelectorAll("form.header-toolbar").forEach(function (form) {
+        form.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" || event.isComposing) {
+                return;
+            }
+            const target = event.target;
+            if (!target || target.closest(".filter-menu")) {
+                return;
+            }
+            if (target.matches("button, summary, textarea")) {
+                return;
+            }
+            event.preventDefault();
+            const submitButton = form.querySelector('button[type="submit"]');
+            if (submitButton) {
+                form.requestSubmit(submitButton);
+                return;
+            }
+            form.requestSubmit();
+        });
+    });
+
+    document.querySelectorAll("[data-drag-scroll]").forEach(function (wrap) {
+        let pointerId = null;
+        let startX = 0;
+        let startScrollLeft = 0;
+        let moved = false;
+
+        wrap.addEventListener("pointerdown", function (event) {
+            const interactiveTarget = event.target.closest("a, button, input, select, textarea, summary, label");
+            if (interactiveTarget || event.button !== 0) {
+                return;
+            }
+            pointerId = event.pointerId;
+            moved = false;
+            startX = event.clientX;
+            startScrollLeft = wrap.scrollLeft;
+            wrap.classList.add("is-dragging");
+            wrap.setPointerCapture(pointerId);
+        });
+
+        wrap.addEventListener("pointermove", function (event) {
+            if (pointerId !== event.pointerId) {
+                return;
+            }
+            const deltaX = event.clientX - startX;
+            if (Math.abs(deltaX) > 4) {
+                moved = true;
+            }
+            wrap.scrollLeft = startScrollLeft - deltaX;
+        });
+
+        wrap.addEventListener("wheel", function (event) {
+            const maxScrollLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+            if (maxScrollLeft <= 0) {
+                return;
+            }
+            const horizontalDelta = Math.abs(event.deltaX) > 0 ? event.deltaX : 0;
+            const shiftWheelDelta = event.shiftKey && Math.abs(event.deltaY) > 0 ? event.deltaY : 0;
+            const delta = horizontalDelta || shiftWheelDelta;
+            if (!delta) {
+                return;
+            }
+            event.preventDefault();
+            wrap.scrollLeft = Math.max(0, Math.min(maxScrollLeft, wrap.scrollLeft + delta));
+        }, { passive: false });
+
+        function stopDrag(event) {
+            if (pointerId !== event.pointerId) {
+                return;
+            }
+            if (wrap.hasPointerCapture(pointerId)) {
+                wrap.releasePointerCapture(pointerId);
+            }
+            pointerId = null;
+            wrap.classList.remove("is-dragging");
+            window.setTimeout(function () {
+                moved = false;
+            }, 0);
+        }
+
+        wrap.addEventListener("pointerup", stopDrag);
+        wrap.addEventListener("pointercancel", stopDrag);
+        wrap.addEventListener("pointerleave", function (event) {
+            if (pointerId === event.pointerId && event.buttons === 0) {
+                stopDrag(event);
+            }
+        });
+
+        wrap.addEventListener("click", function (event) {
+            if (moved) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        }, true);
+    });
+
+    document.querySelectorAll("[data-resizable-table]").forEach(function (table) {
+        const storageKey = "resizable-table:" + (table.dataset.resizableTable || "default");
+        const wrap = table.closest(".table-wrap");
+        const headerCells = Array.from(table.querySelectorAll("thead th[data-column-key]"));
+        const columns = Array.from(table.querySelectorAll("col[data-column-key]"));
+        if (!headerCells.length || !columns.length) {
+            return;
+        }
+
+        const colMap = new Map();
+        columns.forEach(function (col) {
+            colMap.set(col.dataset.columnKey, col);
+        });
+
+        let widths = {};
+        let activeResize = null;
+
+        function readSavedWidths() {
+            try {
+                return JSON.parse(window.localStorage.getItem(storageKey) || "{}");
+            } catch (_error) {
+                return {};
+            }
+        }
+
+        function saveWidths() {
+            try {
+                window.localStorage.setItem(storageKey, JSON.stringify(widths));
+            } catch (_error) {
+                return;
+            }
+        }
+
+        function tableWidth() {
+            return headerCells.reduce(function (sum, cell) {
+                const key = cell.dataset.columnKey || "";
+                const width = Number(widths[key]) || cell.getBoundingClientRect().width || 0;
+                return sum + width;
+            }, 0);
+        }
+
+        function applyWidths(nextWidths) {
+            const normalizedWidths = {};
+            headerCells.forEach(function (cell) {
+                const key = cell.dataset.columnKey || "";
+                const col = colMap.get(key);
+                const minWidth = Number(cell.dataset.columnMinWidth || 96);
+                const width = Math.max(minWidth, Number(nextWidths[key]) || 0);
+                if (key) {
+                    normalizedWidths[key] = width;
+                }
+                if (!col || !width) {
+                    return;
+                }
+                col.style.width = width + "px";
+                cell.style.width = width + "px";
+                cell.style.minWidth = width + "px";
+            });
+            widths = normalizedWidths;
+            const wrapWidth = wrap ? Math.round(wrap.clientWidth) : 0;
+            const totalWidth = Math.max(Math.round(tableWidth()), wrapWidth, 0);
+            if (totalWidth > 0) {
+                table.style.width = totalWidth + "px";
+            }
+        }
+
+        function measureDefaultWidths() {
+            const measured = {};
+            headerCells.forEach(function (cell) {
+                const key = cell.dataset.columnKey || "";
+                if (!key) {
+                    return;
+                }
+                measured[key] = Math.round(cell.getBoundingClientRect().width);
+            });
+            return measured;
+        }
+
+        function stopResize(pointerEvent) {
+            if (!activeResize) {
+                return;
+            }
+            if (pointerEvent && activeResize.pointerId !== pointerEvent.pointerId) {
+                return;
+            }
+            if (pointerEvent && activeResize.handle.hasPointerCapture(pointerEvent.pointerId)) {
+                activeResize.handle.releasePointerCapture(pointerEvent.pointerId);
+            }
+            document.body.classList.remove("is-resizing-columns");
+            if (wrap) {
+                wrap.classList.remove("is-resizing-columns");
+            }
+            saveWidths();
+            activeResize = null;
+        }
+
+        widths = Object.assign(measureDefaultWidths(), readSavedWidths());
+        applyWidths(widths);
+
+        headerCells.forEach(function (cell) {
+            const handle = cell.querySelector("[data-column-resize-handle]");
+            if (!handle) {
+                return;
+            }
+            handle.addEventListener("pointerdown", function (event) {
+                const key = cell.dataset.columnKey || "";
+                if (!key || event.button !== 0) {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                activeResize = {
+                    key: key,
+                    startX: event.clientX,
+                    startWidth: Number(widths[key]) || Math.round(cell.getBoundingClientRect().width),
+                    minWidth: Number(cell.dataset.columnMinWidth || 96),
+                    pointerId: event.pointerId,
+                    handle: handle,
+                };
+                document.body.classList.add("is-resizing-columns");
+                if (wrap) {
+                    wrap.classList.add("is-resizing-columns");
+                }
+                handle.setPointerCapture(event.pointerId);
+            });
+
+            handle.addEventListener("pointermove", function (event) {
+                if (!activeResize || activeResize.pointerId !== event.pointerId) {
+                    return;
+                }
+                event.preventDefault();
+                const nextWidth = Math.max(activeResize.minWidth, Math.round(activeResize.startWidth + (event.clientX - activeResize.startX)));
+                if (nextWidth === widths[activeResize.key]) {
+                    return;
+                }
+                applyWidths(Object.assign({}, widths, {
+                    [activeResize.key]: nextWidth,
+                }));
+            });
+
+            handle.addEventListener("pointerup", stopResize);
+            handle.addEventListener("pointercancel", stopResize);
+        });
+
+        window.addEventListener("resize", function () {
+            if (activeResize) {
+                return;
+            }
+            if (!Object.keys(widths).length) {
+                return;
+            }
+            applyWidths(widths);
+        });
+    });
+
+    document.querySelectorAll("[data-row-link]").forEach(function (row) {
+        function openRowLink() {
+            const rowLink = row.dataset.rowLink;
+            if (rowLink) {
+                window.location.href = rowLink;
+            }
+        }
+
+        row.addEventListener("click", function (event) {
+            if (event.target.closest("a, button, input, select, textarea, summary, label, details, form")) {
+                return;
+            }
+            openRowLink();
+        });
+
+        row.addEventListener("keydown", function (event) {
+            if (event.target !== row) {
+                return;
+            }
+            if (event.key !== "Enter" && event.key !== " ") {
+                return;
+            }
+            event.preventDefault();
+            openRowLink();
+        });
+    });
+
+    function openFloatingModal(modal) {
+        if (!modal) {
+            return;
+        }
+        modal.hidden = false;
+        document.body.classList.add("modal-open");
+    }
+
+    function closeFloatingModal(modal) {
+        if (!modal) {
+            return;
+        }
+        modal.hidden = true;
+        document.body.classList.remove("modal-open");
+    }
+
+    document.querySelectorAll("[data-modal-open]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const modalId = button.dataset.modalOpen;
+            const modal = modalId ? document.getElementById(modalId) : null;
+            openFloatingModal(modal);
+        });
+    });
+
+    document.querySelectorAll(".floating-modal").forEach(function (modal) {
+        modal.querySelectorAll("[data-modal-close]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                closeFloatingModal(modal);
+            });
+        });
+    });
+
+    document.querySelectorAll("[data-async-bug-create]").forEach(function (form) {
+        form.addEventListener("submit", async function (event) {
+            event.preventDefault();
+            const submitButton = form.querySelector('button[type="submit"]');
+            const originalText = submitButton ? submitButton.textContent : "";
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = "创建中...";
+            }
+            try {
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    body: new FormData(form),
+                    headers: {
+                        "Accept": "application/json",
+                        "X-Requested-With": "XMLHttpRequest"
+                    },
+                    credentials: "same-origin"
+                });
+                const data = await response.json().catch(function () {
+                    return { ok: false, message: "创建失败，请重试。" };
+                });
+                if (!response.ok || !data.ok) {
+                    showToast(data.message || "创建失败，请重试。", "error");
+                    return;
+                }
+                showToast(data.message || "创建成功", "success");
+                form.reset();
+                closeFloatingModal(form.closest(".floating-modal"));
+                window.setTimeout(function () {
+                    window.location.reload();
+                }, 320);
+            } catch (_error) {
+                showToast("创建失败，请重试。", "error");
+            } finally {
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = originalText || "创建Bug";
+                }
+            }
+        });
+    });
+
+    document.querySelectorAll("form[enctype='multipart/form-data']").forEach(function (form) {
+        const fileInput = form.querySelector("[data-paste-file-input]");
+        const pasteBox = form.querySelector("[data-paste-upload]");
+        const pasteCapture = form.querySelector("[data-paste-capture]");
+        const fileList = form.querySelector("[data-paste-file-list]");
+        const pasteTargets = Array.from(form.querySelectorAll("[data-paste-image-target]"));
+        if (!fileInput) {
+            return;
+        }
+
+        const dataTransfer = new DataTransfer();
+
+        function syncFiles() {
+            fileInput.files = dataTransfer.files;
+            if (!fileList) {
+                return;
+            }
+            fileList.innerHTML = "";
+            if (!dataTransfer.files.length) {
+                fileList.hidden = true;
+                return;
+            }
+            fileList.hidden = false;
+            Array.from(dataTransfer.files).forEach(function (file, index) {
+                const item = document.createElement("div");
+                item.className = "paste-file-item";
+
+                const name = document.createElement("span");
+                name.className = "paste-file-name";
+                name.textContent = file.name;
+
+                const removeButton = document.createElement("button");
+                removeButton.className = "paste-file-remove";
+                removeButton.type = "button";
+                removeButton.textContent = "×";
+                removeButton.addEventListener("click", function () {
+                    const nextTransfer = new DataTransfer();
+                    Array.from(dataTransfer.files).forEach(function (currentFile, currentIndex) {
+                        if (currentIndex !== index) {
+                            nextTransfer.items.add(currentFile);
+                        }
+                    });
+                    dataTransfer.items.clear();
+                    Array.from(nextTransfer.files).forEach(function (currentFile) {
+                        dataTransfer.items.add(currentFile);
+                    });
+                    syncFiles();
+                });
+
+                item.appendChild(name);
+                item.appendChild(removeButton);
+                fileList.appendChild(item);
+            });
+        }
+
+        function addFiles(files) {
+            Array.from(files || []).forEach(function (file) {
+                if (!file) {
+                    return;
+                }
+                dataTransfer.items.add(file);
+            });
+            syncFiles();
+        }
+
+        function flashPasteBox() {
+            if (!pasteBox) {
+                return;
+            }
+            pasteBox.classList.add("is-active");
+            window.setTimeout(function () {
+                pasteBox.classList.remove("is-active");
+            }, 1200);
+        }
+
+        function getPastedImages(event) {
+            const clipboardItems = Array.from((event.clipboardData && event.clipboardData.items) || []);
+            return clipboardItems
+                .filter(function (item) {
+                    return item.kind === "file" && item.type.indexOf("image/") === 0;
+                })
+                .map(function (item, index) {
+                    const file = item.getAsFile();
+                    if (!file) {
+                        return null;
+                    }
+                    const extension = file.type.split("/")[1] || "png";
+                    return new File([file], "paste-image-" + Date.now() + "-" + index + "." + extension, { type: file.type });
+                })
+                .filter(Boolean);
+        }
+
+        function handleImagePaste(event, sourceLabel) {
+            const pastedImages = getPastedImages(event);
+            if (!pastedImages.length) {
+                return false;
+            }
+            event.preventDefault();
+            addFiles(pastedImages);
+            flashPasteBox();
+            showToast((sourceLabel || "当前输入框") + " 的图片已添加到附件。", "success");
+            return true;
+        }
+
+        function focusPasteCapture() {
+            if (!pasteCapture) {
+                return;
+            }
+            pasteCapture.focus({ preventScroll: true });
+            if (typeof pasteCapture.setSelectionRange === "function") {
+                const length = pasteCapture.value.length;
+                pasteCapture.setSelectionRange(length, length);
+            }
+        }
+
+        fileInput.addEventListener("change", function () {
+            const nextTransfer = new DataTransfer();
+            Array.from(dataTransfer.files).forEach(function (file) {
+                nextTransfer.items.add(file);
+            });
+            Array.from(fileInput.files || []).forEach(function (file) {
+                nextTransfer.items.add(file);
+            });
+            dataTransfer.items.clear();
+            Array.from(nextTransfer.files).forEach(function (file) {
+                dataTransfer.items.add(file);
+            });
+            syncFiles();
+        });
+
+        pasteTargets.forEach(function (target) {
+            target.addEventListener("paste", function (event) {
+                handleImagePaste(event, target.dataset.pasteImageTarget || "当前输入框");
+            });
+        });
+
+        if (pasteCapture) {
+            pasteCapture.addEventListener("paste", function (event) {
+                if (handleImagePaste(event, "附件区域")) {
+                    pasteCapture.value = "";
+                    return;
+                }
+                pasteCapture.value = "";
+                showToast("未检测到图片内容，请先复制截图。", "error");
+            });
+
+            pasteCapture.addEventListener("input", function () {
+                pasteCapture.value = "";
+            });
+        }
+
+        if (pasteBox) {
+            pasteBox.addEventListener("paste", function (event) {
+                if (handleImagePaste(event, "附件区域")) {
+                    return;
+                }
+                showToast("未检测到图片内容，请先复制截图。", "error");
+            });
+
+            pasteBox.addEventListener("click", function () {
+                focusPasteCapture();
+            });
+
+            pasteBox.addEventListener("focus", function () {
+                focusPasteCapture();
+            });
+
+            pasteBox.addEventListener("keydown", function (event) {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    focusPasteCapture();
+                }
+            });
+
+            pasteBox.setAttribute("tabindex", "0");
+        }
+
+        syncFiles();
+    });
+
+    const modal = document.getElementById("confirm-modal");
+    const submitBtn = document.getElementById("confirm-modal-submit");
+    if (modal && submitBtn) {
+        const titleEl = document.getElementById("confirm-modal-title");
+        const textEl = document.getElementById("confirm-modal-text");
+        let activeForm = null;
+
+        function closeModal() {
+            modal.hidden = true;
+            document.body.classList.remove("modal-open");
+            activeForm = null;
+        }
+
+        document.querySelectorAll("[data-confirm-form]").forEach(function (form) {
+            form.addEventListener("submit", function (event) {
+                event.preventDefault();
+                activeForm = form;
+                if (titleEl) {
+                    titleEl.textContent = form.dataset.confirmTitle || "确认删除";
+                }
+                if (textEl) {
+                    textEl.textContent = form.dataset.confirmMessage || "确认继续当前操作吗？";
+                }
+                modal.hidden = false;
+                document.body.classList.add("modal-open");
+            });
+        });
+
+        submitBtn.addEventListener("click", function () {
+            if (!activeForm) {
+                closeModal();
+                return;
+            }
+            const form = activeForm;
+            closeModal();
+            HTMLFormElement.prototype.submit.call(form);
+        });
+
+        modal.querySelectorAll("[data-confirm-cancel]").forEach(function (button) {
+            button.addEventListener("click", closeModal);
+        });
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !modal.hidden) {
+                closeModal();
+            }
+        });
+    }
+});
+</script>
+</html>

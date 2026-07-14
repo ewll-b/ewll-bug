@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}需求详情 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('requirement_library') }}">返回需求管理</a>
+</div>
+
+<section class="panel">
+    <div class="panel-head detail-page-head">
+        <h2>需求详情</h2>
+        {% if current_user and (is_admin or requirement.creator_id == current_user.id) %}
+            <div class="head-actions">
+                {% if request.args.get('edit') == '1' %}
+                    <a class="btn btn-secondary mini" href="{{ url_for('requirement_detail', requirement_id=requirement.id) }}">取消编辑</a>
+                {% else %}
+                    <a class="btn btn-primary mini" href="{{ url_for('requirement_detail', requirement_id=requirement.id, edit='1') }}">编辑</a>
+                {% endif %}
+                <form method="post" action="{{ url_for('delete_requirement', requirement_id=requirement.id) }}" data-confirm-form data-confirm-title="确认删除需求" data-confirm-message="删除后该条需求挂载记录会被移除，确定继续吗？">
+                    <input type="hidden" name="next" value="{{ url_for('requirement_library') }}">
+                    <button class="btn btn-secondary mini danger-btn" type="submit">删除</button>
+                </form>
+            </div>
+        {% endif %}
+    </div>
+
+    {% if request.args.get('edit') == '1' and current_user and (is_admin or requirement.creator_id == current_user.id) %}
+        <form class="form-grid detail-edit-grid" method="post" action="{{ url_for('update_requirement', requirement_id=requirement.id) }}">
+            <input type="hidden" name="next" value="{{ url_for('requirement_detail', requirement_id=requirement.id) }}">
+            <input type="hidden" name="code" value="{{ requirement.code }}">
+            <label class="full">
+                <span>需求标题</span>
+                <input type="text" name="title" value="{{ requirement.title }}" required>
+            </label>
+            <label>
+                <span>版本</span>
+                <input type="text" name="version" value="{{ requirement.version or '' }}" required>
+            </label>
+            <label>
+                <span>内部编号</span>
+                <input type="text" value="{{ requirement.code }}" readonly>
+            </label>
+            <label class="full">
+                <span>需求文档链接</span>
+                <input type="url" name="requirement_doc_link" value="{{ requirement.requirement_doc_link or '' }}" placeholder="https://...">
+            </label>
+            <label class="full">
+                <span>设计稿链接</span>
+                <input type="url" name="design_doc_link" value="{{ requirement.design_doc_link or '' }}" placeholder="https://...">
+            </label>
+            <div class="form-actions full">
+                <button class="btn btn-primary" type="submit">保存修改</button>
+                <a class="btn btn-secondary" href="{{ url_for('requirement_detail', requirement_id=requirement.id) }}">取消</a>
+            </div>
+        </form>
+    {% else %}
+        <div class="info-grid">
+            <div class="info-item wide"><b>需求标题</b><span>{{ requirement.title }}</span></div>
+            <div class="info-item"><b>版本</b><span>{{ requirement.version or "-" }}</span></div>
+            <div class="info-item"><b>内部编号</b><span>{{ requirement.code }}</span></div>
+            <div class="info-item"><b>项目</b><span>{{ requirement.project_name }}</span></div>
+            <div class="info-item"><b>创建人</b><span>{{ requirement.creator_name or "-" }}</span></div>
+            <div class="info-item"><b>关联Bug</b><span>{{ requirement.linked_bug_count or 0 }}</span></div>
+            <div class="info-item"><b>创建时间</b><span>{{ requirement.created_at or "-" }}</span></div>
+            <div class="info-item"><b>更新时间</b><span>{{ requirement.updated_at or "-" }}</span></div>
+        </div>
+
+        <div class="doc-link-grid">
+            <a class="doc-link-card {% if not requirement.requirement_doc_link %}is-disabled{% endif %}" {% if requirement.requirement_doc_link %}href="{{ requirement.requirement_doc_link }}" target="_blank" rel="noopener noreferrer"{% endif %}>
+                <span class="doc-link-eyebrow">需求文档</span>
+                <strong>打开 Lark 需求文档</strong>
+                <span>{{ requirement.requirement_doc_link or "暂未挂载链接" }}</span>
+            </a>
+            <a class="doc-link-card secondary {% if not requirement.design_doc_link %}is-disabled{% endif %}" {% if requirement.design_doc_link %}href="{{ requirement.design_doc_link }}" target="_blank" rel="noopener noreferrer"{% endif %}>
+                <span class="doc-link-eyebrow">设计稿</span>
+                <strong>打开设计稿链接</strong>
+                <span>{{ requirement.design_doc_link or "暂未挂载链接" }}</span>
+            </a>
+        </div>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <div class="panel-head">
+        <h3>关联 Bug</h3>
+        <div class="table-meta">共 {{ linked_bugs|length }} 条</div>
+    </div>
+
+    <div class="table-wrap">
+        <table class="data-table bug-table">
+            <thead>
+                <tr>
+                    <th class="bug-col-no">编号</th>
+                    <th class="bug-col-title">标题</th>
+                    <th class="bug-col-status">状态</th>
+                    <th class="bug-col-owner">当前处理人</th>
+                    <th class="bug-col-owner">创建人</th>
+                    <th class="bug-col-version">版本</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bug in linked_bugs %}
+                    <tr>
+                        <td>{{ format_bug_no(bug.bug_no or bug.id) }}</td>
+                        <td class="bug-title-col">
+                            <a class="table-link bug-title-link" href="{{ url_for('bug_detail', bug_id=bug.id) }}" title="{{ bug.title }}">{{ bug.title }}</a>
+                        </td>
+                        <td><span class="status-select status-{{ bug.status }}"><span>{{ status_labels[bug.status] }}</span><span class="status-caret" hidden></span></span></td>
+                        <td>{{ bug.assignee_name or "-" }}</td>
+                        <td>{{ bug.creator_name or "-" }}</td>
+                        <td>{{ bug.version or "-" }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="6" class="empty-row">暂无关联 Bug</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

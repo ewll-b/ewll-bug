@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}测试报告 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<section class="panel list-page-panel report-page-panel">
+    <div class="panel-head">
+        <h2>测试报告</h2>
+        <div class="head-stats">
+            <span>项目：{{ report.project.name if report.project else '' }}</span>
+            <span>版本：{{ report.selected_version or "全部版本" }}</span>
+            <span>用例总数：{{ report.case_total }}</span>
+            <a class="btn btn-primary mini" href="{{ url_for('export_testing_report', version=report.selected_version) }}">导出报告</a>
+        </div>
+    </div>
+
+    <form class="toolbar compact-toolbar header-toolbar" method="get" action="{{ url_for('testing_report') }}">
+        <select name="version">
+            <option value="">全部版本</option>
+            {% for version in report.versions %}
+                <option value="{{ version }}" {% if report.selected_version == version %}selected{% endif %}>{{ version }}</option>
+            {% endfor %}
+        </select>
+        <button class="btn btn-primary mini" type="submit">切换版本</button>
+        <a class="btn btn-secondary mini" href="{{ url_for('testing_report') }}">重置</a>
+    </form>
+
+    <div class="report-layout">
+        <div class="chart-panel">
+            <h3>执行结果分布</h3>
+            <img src="{{ url_for('testing_report_chart', version=report.selected_version) if report.selected_version else url_for('testing_report_chart') }}" alt="执行结果分布图">
+        </div>
+        <div class="chart-table">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>结果</th>
+                        <th>用例数</th>
+                        <th>占比</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in report.distribution %}
+                        <tr>
+                            <td><span class="legend-dot" style="background: {{ item.color }}"></span>{{ item.status }}</td>
+                            <td>{{ item.count }}</td>
+                            <td>{{ item.percent }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="report-summary">
+        <span>用例总数：{{ report.case_total }}</span>
+        <span>Bug总数：{{ report.summary.total }}</span>
+        <span>待处理：{{ report.summary.active_count }}</span>
+        <span>待验证：{{ report.summary.verification_count }}</span>
+        <span>已关闭：{{ report.summary.closed_count }}</span>
+    </div>
+
+    <div class="table-meta">共 {{ report.bug_page.total }} 条，当前显示 {{ report.bug_page.start_index }} - {{ report.bug_page.end_index }}</div>
+
+    <div class="table-wrap report-bug-table-wrap">
+        <table class="data-table bug-table">
+            <thead>
+                <tr>
+                    <th class="bug-col-no">编号</th>
+                    <th class="bug-col-title">标题</th>
+                    <th class="bug-col-version">版本</th>
+                    <th class="bug-col-severity">严重级别</th>
+                    <th class="bug-col-status">状态</th>
+                    <th class="bug-col-owner">当前处理人</th>
+                    <th class="bug-col-owner">创建人</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bug in report.bugs %}
+                    <tr>
+                        <td>{{ format_bug_no(bug.bug_no or bug.id) }}</td>
+                        <td class="bug-title-col">
+                            <a class="table-link bug-title-link" href="{{ url_for('bug_detail', bug_id=bug.id) }}" title="{{ bug.title }}">{{ bug.title }}</a>
+                        </td>
+                        <td>{{ bug.version or "-" }}</td>
+                        <td><span class="severity-chip severity-{{ bug.severity }}">{{ bug.severity }}</span></td>
+                        <td>
+                            <form class="inline-status-form" method="post" action="{{ url_for('update_bug', bug_id=bug.id) }}">
+                                <input type="hidden" name="action" value="change_status">
+                                <input type="hidden" name="redirect_to" value="{{ request.full_path if request.query_string else request.path }}">
+                                <details class="status-dropdown">
+                                    <summary class="status-select status-{{ bug.status }}">
+                                        <span>{{ status_labels[bug.status] }}</span>
+                                        <span class="status-caret"></span>
+                                    </summary>
+                                    <div class="status-menu">
+                                        {% for code, label in g.status_options %}
+                                            <button class="status-option {% if bug.status == code %}active{% endif %}" type="submit" name="status" value="{{ code }}">{{ label }}</button>
+                                        {% endfor %}
+                                    </div>
+                                </details>
+                            </form>
+                        </td>
+                        <td>{{ bug.assignee_name }}</td>
+                        <td>{{ bug.creator_name }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="7" class="empty-row">暂无数据</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pager page-jump-row">
+        {% if report.bug_page.has_prev %}
+            <a class="btn btn-secondary mini" href="{{ fetch_report_page_url(report.bug_page.page - 1, report.selected_version) }}">上一页</a>
+        {% endif %}
+        <span>第 {{ report.bug_page.page }} / {{ report.bug_page.pages }} 页</span>
+        <form class="page-jump-form" method="get" action="{{ build_report_jump_url(report.selected_version) }}">
+            {% if report.selected_version %}
+                <input type="hidden" name="version" value="{{ report.selected_version }}">
+            {% endif %}
+            <input class="page-jump-input" type="number" name="page" min="1" max="{{ report.bug_page.pages }}" value="{{ report.bug_page.page }}">
+            <button class="btn btn-secondary mini" type="submit">跳转</button>
+        </form>
+        {% if report.bug_page.has_next %}
+            <a class="btn btn-secondary mini" href="{{ fetch_report_page_url(report.bug_page.page + 1, report.selected_version) }}">下一页</a>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

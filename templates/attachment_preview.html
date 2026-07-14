@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}附件预览 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<div class="page-backbar">
+    <a class="btn btn-secondary mini back-btn" href="{{ url_for('bug_list') }}">返回列表</a>
+</div>
+<section class="panel">
+    <div class="panel-head">
+        <h2>附件预览</h2>
+        <div class="header-actions">
+            <a class="btn btn-primary mini" href="{{ url_for('view_attachment', attachment_id=attachment.id) }}" target="_blank" rel="noopener noreferrer">打开原文件</a>
+        </div>
+    </div>
+
+    <div class="document-meta-card">
+        <div>文件名：{{ attachment.filename }}</div>
+        <div>类型：{{ attachment.content_type or "未知" }}</div>
+        <div>上传时间：{{ attachment.created_at }}</div>
+    </div>
+
+    <div class="attachment-preview-note">
+        当前页面用于提供统一的返回入口。
+        如果是图片或日志文件，点击“打开原文件”会在新页直接查看实际内容。
+    </div>
+</section>
+{% endblock %}

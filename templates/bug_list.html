@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}Bug列表 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+{% set version_display = namespace(label='版本') %}
+{% if filters.version %}
+    {% set version_display.label = filters.version %}
+{% endif %}
+{% set platform_display = namespace(label='端') %}
+{% for platform in bug_platform_options %}
+    {% if filters.platform == platform %}
+        {% set platform_display.label = platform %}
+    {% endif %}
+{% endfor %}
+{% set creator_display = namespace(label='创建人') %}
+{% for user in users %}
+    {% if filters.creator_id == user.id|string %}
+        {% set creator_display.label = user.name %}
+    {% endif %}
+{% endfor %}
+{% set assignee_display = namespace(label='处理人') %}
+{% for user in users %}
+    {% if filters.assignee_id == user.id|string %}
+        {% set assignee_display.label = user.name %}
+    {% endif %}
+{% endfor %}
+{% set status_display = namespace(label='状态') %}
+{% for code, label in g.status_options %}
+    {% if filters.status == code %}
+        {% set status_display.label = label %}
+    {% endif %}
+{% endfor %}
+<section class="panel list-page-panel">
+    <div class="list-header-wrap">
+        <div class="list-header single-row-header">
+            <div class="page-title-row">
+                <h2 class="list-page-title">Bug列表</h2>
+                <button class="btn btn-primary mini" type="button" data-modal-open="create-bug-modal">新建Bug</button>
+            </div>
+            <form class="toolbar compact-toolbar header-toolbar" method="get" action="{{ url_for('bug_list') }}">
+                <input type="text" name="keyword" value="{{ filters.keyword }}" placeholder="搜索编号/标题/创建人/处理人">
+                <input id="bug-filter-version" type="hidden" name="version" value="{{ filters.version }}">
+                <details class="filter-dropdown filter-dropdown-sm">
+                    <summary class="filter-select">
+                        <span data-filter-label>{{ version_display.label }}</span>
+                        <span class="filter-caret"></span>
+                    </summary>
+                    <div class="filter-menu">
+                        <button class="filter-option {% if not filters.version %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-version" data-filter-value="" data-filter-label="版本">全部版本</button>
+                        {% for version in bug_versions %}
+                            <button class="filter-option {% if filters.version == version %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-version" data-filter-value="{{ version }}" data-filter-label="{{ version }}">{{ version }}</button>
+                        {% endfor %}
+                    </div>
+                </details>
+                <input id="bug-filter-platform" type="hidden" name="platform" value="{{ filters.platform }}">
+                <details class="filter-dropdown filter-dropdown-sm">
+                    <summary class="filter-select">
+                        <span data-filter-label>{{ platform_display.label }}</span>
+                        <span class="filter-caret"></span>
+                    </summary>
+                    <div class="filter-menu">
+                        <button class="filter-option {% if not filters.platform %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-platform" data-filter-value="" data-filter-label="端">全部端</button>
+                        {% for platform in bug_platform_options %}
+                            <button class="filter-option {% if filters.platform == platform %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-platform" data-filter-value="{{ platform }}" data-filter-label="{{ platform }}">{{ platform }}</button>
+                        {% endfor %}
+                    </div>
+                </details>
+                <input id="bug-filter-creator" type="hidden" name="creator_id" value="{{ filters.creator_id }}">
+                <details class="filter-dropdown filter-dropdown-md">
+                    <summary class="filter-select">
+                        <span data-filter-label>{{ creator_display.label }}</span>
+                        <span class="filter-caret"></span>
+                    </summary>
+                    <div class="filter-menu">
+                        <button class="filter-option {% if not filters.creator_id %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-creator" data-filter-value="" data-filter-label="创建人">全部创建人</button>
+                        {% for user in users %}
+                            <button class="filter-option {% if filters.creator_id == user.id|string %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-creator" data-filter-value="{{ user.id }}" data-filter-label="{{ user.name }}">{{ user.name }}</button>
+                        {% endfor %}
+                    </div>
+                </details>
+                <input id="bug-filter-assignee" type="hidden" name="assignee_id" value="{{ filters.assignee_id }}">
+                <details class="filter-dropdown filter-dropdown-md">
+                    <summary class="filter-select">
+                        <span data-filter-label>{{ assignee_display.label }}</span>
+                        <span class="filter-caret"></span>
+                    </summary>
+                    <div class="filter-menu">
+                        <button class="filter-option {% if not filters.assignee_id %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-assignee" data-filter-value="" data-filter-label="处理人">全部处理人</button>
+                        {% for user in users %}
+                            <button class="filter-option {% if filters.assignee_id == user.id|string %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-assignee" data-filter-value="{{ user.id }}" data-filter-label="{{ user.name }}">{{ user.name }}</button>
+                        {% endfor %}
+                    </div>
+                </details>
+                <input id="bug-filter-status" type="hidden" name="status" value="{{ filters.status }}">
+                <details class="filter-dropdown filter-dropdown-sm">
+                    <summary class="filter-select">
+                        <span data-filter-label>{{ status_display.label }}</span>
+                        <span class="filter-caret"></span>
+                    </summary>
+                    <div class="filter-menu">
+                        <button class="filter-option {% if not filters.status %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-status" data-filter-value="" data-filter-label="状态">全部状态</button>
+                        {% for code, label in g.status_options %}
+                            <button class="filter-option {% if filters.status == code %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-status" data-filter-value="{{ code }}" data-filter-label="{{ label }}">{{ label }}</button>
+                        {% endfor %}
+                    </div>
+                </details>
+                <input type="date" name="created_from" value="{{ filters.created_from }}">
+                <input type="date" name="created_to" value="{{ filters.created_to }}">
+                <button class="btn btn-primary mini" type="submit">筛选</button>
+                <a class="btn btn-secondary mini" href="{{ url_for('bug_list') }}">重置</a>
+            </form>
+            <div class="head-stats list-stats">
+                <span>总数：{{ summary.total }}</span>
+                <span>待处理：{{ summary.active_count }}</span>
+                <span>待验证：{{ summary.verification_count }}</span>
+                <span>已关闭：{{ summary.closed_count }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-meta">共 {{ bug_page.total }} 条，当前显示 {{ bug_page.start_index }} - {{ bug_page.end_index }}</div>
+
+    <div class="table-wrap drag-scroll-wrap" data-drag-scroll>
+        <table class="data-table bug-table jira-like-table" data-resizable-table="bug-list-{{ current_user.id if current_user else 'guest' }}-{{ current_project.id if current_project else 'all' }}">
+            <colgroup>
+                <col class="bug-col-no" data-column-key="bug_no">
+                <col class="bug-col-title" data-column-key="title">
+                <col class="bug-col-version" data-column-key="version">
+                <col class="bug-col-platform" data-column-key="platform">
+                <col class="bug-col-severity" data-column-key="severity">
+                <col class="bug-col-status" data-column-key="status">
+                <col class="bug-col-owner" data-column-key="assignee">
+                <col class="bug-col-owner" data-column-key="creator">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th class="bug-col-no" data-column-key="bug_no" data-column-min-width="88">
+                        <span class="table-head-label">编号</span>
+                        <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                    </th>
+                    <th class="bug-col-title" data-column-key="title" data-column-min-width="260">
+                        <span class="table-head-label">标题</span>
+                        <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                    </th>
+                    <th class="bug-col-version" data-column-key="version" data-column-min-width="120">
+                        <span class="table-head-label">版本</span>
+                        <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                    </th>
+                    <th class="bug-col-platform" data-column-key="platform" data-column-min-width="120">
+                        <span class="table-head-label">端</span>
+                        <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                    </th>
+                    <th class="bug-col-severity" data-column-key="severity" data-column-min-width="132">
+                        <span class="table-head-label">严重级别</span>
+                        <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                    </th>
+                    <th class="bug-col-status" data-column-key="status" data-column-min-width="132">
+                        <span class="table-head-label">状态</span>
+                        <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                    </th>
+                    <th class="bug-col-owner" data-column-key="assignee" data-column-min-width="156">
+                        <span class="table-head-label">当前处理人</span>
+                        <span class="column-resize-handle" data-column-resize-handle aria-hidden="true"></span>
+                    </th>
+                    <th class="bug-col-owner" data-column-key="creator" data-column-min-width="156">
+                        <span class="table-head-label">创建人</span>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bug in bugs %}
+                    <tr class="bug-row" data-row-link="{{ url_for('bug_detail', bug_id=bug.id) }}" tabindex="0">
+                        <td>{{ format_bug_no(bug.bug_no or bug.id) }}</td>
+                        <td class="bug-title-col">
+                            <a class="table-link bug-title-link" href="{{ url_for('bug_detail', bug_id=bug.id) }}" title="{{ bug.title }}">{{ bug.title }}</a>
+                        </td>
+                        <td>{{ bug.version or "-" }}</td>
+                        <td>
+                            {% if can_edit_bug_platform(bug) %}
+                                <form class="inline-platform-form" method="post" action="{{ url_for('update_bug', bug_id=bug.id) }}">
+                                    <input type="hidden" name="action" value="change_platform">
+                                    <input type="hidden" name="redirect_to" value="{{ request.full_path if request.query_string else request.path }}">
+                                    <details class="platform-dropdown">
+                                        <summary class="platform-select" data-platform-value="{{ bug.platform or '' }}">
+                                            <span>{{ bug.platform or "请选择" }}</span>
+                                            <span class="status-caret"></span>
+                                        </summary>
+                                        <div class="platform-menu">
+                                            {% for platform in bug_platform_options %}
+                                                <button class="platform-option {% if bug.platform == platform %}active{% endif %}" type="submit" name="platform" value="{{ platform }}" data-platform-value="{{ platform }}">{{ platform }}</button>
+                                            {% endfor %}
+                                        </div>
+                                    </details>
+                                </form>
+                            {% elif bug.platform %}
+                                <span class="platform-chip" data-platform-value="{{ bug.platform }}">{{ bug.platform }}</span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td><span class="severity-chip severity-{{ bug.severity }}">{{ bug.severity }}</span></td>
+                        <td>
+                            <form class="inline-status-form" method="post" action="{{ url_for('update_bug', bug_id=bug.id) }}">
+                                <input type="hidden" name="action" value="change_status">
+                                <input type="hidden" name="redirect_to" value="{{ request.full_path if request.query_string else request.path }}">
+                                <details class="status-dropdown">
+                                    <summary class="status-select status-{{ bug.status }}">
+                                        <span>{{ status_labels[bug.status] }}</span>
+                                        <span class="status-caret"></span>
+                                    </summary>
+                                    <div class="status-menu">
+                                        {% for code, label in g.status_options %}
+                                            <button class="status-option {% if bug.status == code %}active{% endif %}" type="submit" name="status" value="{{ code }}">{{ label }}</button>
+                                        {% endfor %}
+                                    </div>
+                                </details>
+                            </form>
+                        </td>
+                        <td>{{ bug.assignee_name }}</td>
+                        <td>{{ bug.creator_name }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="8" class="empty-row">暂无数据</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if bug_page.pages > 1 %}
+        <nav class="pager page-jump-row bug-pager" aria-label="Bug列表分页">
+            <div class="pager-summary">第 {{ bug_page.page }} / {{ bug_page.pages }} 页</div>
+            <div class="page-number-list">
+                {% if bug_page.has_prev %}
+                    <a class="btn btn-secondary mini pager-action" href="{{ build_page_url(bug_page.page - 1, filters) }}">上一页</a>
+                {% else %}
+                    <span class="btn btn-secondary mini pager-action disabled" aria-disabled="true">上一页</span>
+                {% endif %}
+                {% for item in bug_page.page_items %}
+                    {% if item.type == "ellipsis" %}
+                        <span class="pager-ellipsis" aria-hidden="true">...</span>
+                    {% elif item.current %}
+                        <span class="btn btn-secondary mini page-number active" aria-current="page">{{ item.page }}</span>
+                    {% else %}
+                        <a class="btn btn-secondary mini page-number" href="{{ build_page_url(item.page, filters) }}">{{ item.page }}</a>
+                    {% endif %}
+                {% endfor %}
+                {% if bug_page.has_next %}
+                    <a class="btn btn-secondary mini pager-action" href="{{ build_page_url(bug_page.page + 1, filters) }}">下一页</a>
+                {% else %}
+                    <span class="btn btn-secondary mini pager-action disabled" aria-disabled="true">下一页</span>
+                {% endif %}
+            </div>
+            <form class="page-jump-form" method="get" action="{{ build_page_jump_url(filters) }}">
+                <input type="hidden" name="keyword" value="{{ filters.keyword }}">
+                <input type="hidden" name="version" value="{{ filters.version }}">
+                <input type="hidden" name="platform" value="{{ filters.platform }}">
+                <input type="hidden" name="creator_id" value="{{ filters.creator_id }}">
+                <input type="hidden" name="assignee_id" value="{{ filters.assignee_id }}">
+                <input type="hidden" name="status" value="{{ filters.status }}">
+                <input type="hidden" name="created_from" value="{{ filters.created_from }}">
+                <input type="hidden" name="created_to" value="{{ filters.created_to }}">
+                <input class="page-jump-input" type="number" name="page" min="1" max="{{ bug_page.pages }}" value="{{ bug_page.page }}">
+                <button class="btn btn-secondary mini" type="submit">跳转</button>
+            </form>
+        </nav>
+    {% endif %}
+</section>
+
+<div class="floating-modal" id="create-bug-modal" hidden>
+    <div class="floating-modal-backdrop" data-modal-close></div>
+    <div class="floating-modal-card bug-create-modal-card" role="dialog" aria-modal="true" aria-labelledby="create-bug-modal-title">
+        <div class="floating-modal-head">
+            <h3 id="create-bug-modal-title">新建Bug</h3>
+            <button class="modal-close-btn" type="button" aria-label="关闭" data-modal-close>×</button>
+        </div>
+        <form class="form-grid modal-form bug-create-form" method="post" action="{{ url_for('create_bug') }}" enctype="multipart/form-data" data-async-bug-create>
+            {% include "_bug_form_fields.html" %}
+            <div class="form-actions full">
+                <button class="btn btn-primary" type="submit">创建Bug</button>
+                <button class="btn btn-secondary" type="button" data-modal-close>取消</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - AlvinsClubBugManage{% endblock %}
+
+{% block content %}
+<section class="panel profile-panel">
+    <div class="panel-head">
+        <h2>个人信息管理</h2>
+    </div>
+
+    <form class="form-grid profile-form" method="post">
+        <label>
+            <span>姓名</span>
+            <input type="text" name="name" value="{{ profile_user.name }}" required>
+        </label>
+        <label>
+            <span>账号</span>
+            <input type="text" value="{{ profile_user.username or '' }}" disabled>
+        </label>
+        <label class="full">
+            <span>邮箱</span>
+            <input type="email" name="email" value="{{ profile_user.email or '' }}" placeholder="name@alvinsclub.ai">
+        </label>
+        <label>
+            <span>角色</span>
+            <input type="text" value="{{ profile_user.role }}" disabled>
+        </label>
+        <label>
+            <span>角色编码</span>
+            <input type="text" value="{{ profile_user.role_code or '' }}" disabled>
+        </label>
+        <label class="full">
+            <span>新密码</span>
+            <input type="password" name="password" placeholder="不修改可留空">
+        </label>
+        <div class="form-actions full">
+            <button class="btn btn-primary" type="submit">保存信息</button>
+            <a class="btn btn-secondary" href="{{ url_for('bug_list') }}">返回工作台</a>
+        </div>
+    </form>
+</section>
+{% endblock %}
