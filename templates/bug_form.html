@@ -11,7 +11,7 @@
         <h2>新建Bug</h2>
     </div>
 
-    <form class="form-grid" method="post" enctype="multipart/form-data">
+    <form class="form-grid" method="post" enctype="multipart/form-data" data-bug-create-form data-draft-form data-draft-key="bug-create:{{ current_project.id if current_project else 'none' }}" novalidate>
         <input type="hidden" name="next" value="{{ back_url }}">
         {% include "_bug_form_fields.html" %}
         <div class="form-actions full">

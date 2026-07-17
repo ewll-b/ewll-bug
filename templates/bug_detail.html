@@ -62,6 +62,18 @@
         </div>
     </article>
 {%- endmacro %}
+{% macro inline_attachment_gallery(items) -%}
+    {% if items %}
+        <div class="inline-attachment-gallery">
+            {% for item in items %}
+                <a class="inline-attachment-card" href="{{ url_for('view_attachment', attachment_id=item.id) }}" data-image-preview-src="{{ url_for('view_attachment', attachment_id=item.id) }}" data-image-preview-title="{{ item.filename }}" title="{{ item.filename }}">
+                    <img src="{{ url_for('view_attachment', attachment_id=item.id) }}" alt="{{ item.filename }}">
+                    <span>{{ item.filename }}</span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+{%- endmacro %}
 <div class="page-backbar">
     <a class="btn btn-secondary mini back-btn" href="{{ back_url }}">返回上一页</a>
 </div>
@@ -89,15 +101,17 @@
     </div>
 
     {% if active_tab == "detail" and request.args.get('edit') == '1' and current_user and (is_admin or bug.creator_id == current_user.id) %}
-        <form class="form-grid detail-edit-grid" method="post" action="{{ url_for('edit_bug', bug_id=bug.id) }}" enctype="multipart/form-data">
+        <form class="form-grid detail-edit-grid" method="post" action="{{ url_for('edit_bug', bug_id=bug.id) }}" enctype="multipart/form-data" data-draft-form data-draft-key="bug-edit:{{ bug.id }}" novalidate>
             <input type="hidden" name="next" value="{{ back_url }}">
             <label class="full">
                 <span>标题</span>
                 <input type="text" name="title" value="{{ bug.title }}" required>
+                <div class="paste-inline-preview" data-paste-preview-for="title" hidden></div>
             </label>
             <label>
                 <span>版本</span>
                 <input type="text" name="version" value="{{ bug.version or '' }}" required>
+                <div class="paste-inline-preview" data-paste-preview-for="version" hidden></div>
             </label>
             <label>
                 <span>端</span>
@@ -153,49 +167,39 @@
             <label class="full">
                 <span>环境信息</span>
                 <input type="text" name="environment" value="{{ bug.environment or '' }}">
+                <div class="paste-inline-preview" data-paste-preview-for="environment" hidden></div>
             </label>
             <label class="full">
                 <span>问题描述</span>
-                <textarea name="description" rows="5" required data-paste-image-target="问题描述">{{ bug.description }}</textarea>
-                <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+                <textarea class="rich-paste-source" name="description" data-rich-source="description">{{ bug.description }}</textarea>
+                <div class="rich-paste-editor" role="textbox" aria-multiline="true" aria-required="true" contenteditable="true" data-rich-paste-editor data-rich-field="description" data-paste-image-target="问题描述" data-placeholder="请输入问题描述"></div>
+                <div class="paste-inline-preview" data-paste-preview-for="description" hidden></div>
+                <small class="field-tip">支持在框内输入文字和粘贴图片，图片会随 Bug 一起保存。</small>
             </label>
             <label class="full">
                 <span>期望结果</span>
-                <textarea name="expected_result" rows="3" data-paste-image-target="期望结果">{{ bug.expected_result or '' }}</textarea>
-                <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+                <textarea class="rich-paste-source" name="expected_result" data-rich-source="expected_result">{{ bug.expected_result or '' }}</textarea>
+                <div class="rich-paste-editor compact" role="textbox" aria-multiline="true" contenteditable="true" data-rich-paste-editor data-rich-field="expected_result" data-paste-image-target="期望结果" data-placeholder="请输入期望结果"></div>
+                <div class="paste-inline-preview" data-paste-preview-for="expected_result" hidden></div>
+                <small class="field-tip">支持在框内输入文字和粘贴图片，图片会随 Bug 一起保存。</small>
             </label>
             <label class="full">
                 <span>实际结果</span>
-                <textarea name="actual_result" rows="3" data-paste-image-target="实际结果">{{ bug.actual_result or '' }}</textarea>
-                <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+                <textarea class="rich-paste-source" name="actual_result" data-rich-source="actual_result">{{ bug.actual_result or '' }}</textarea>
+                <div class="rich-paste-editor compact" role="textbox" aria-multiline="true" contenteditable="true" data-rich-paste-editor data-rich-field="actual_result" data-paste-image-target="实际结果" data-placeholder="请输入实际结果"></div>
+                <div class="paste-inline-preview" data-paste-preview-for="actual_result" hidden></div>
+                <small class="field-tip">支持在框内输入文字和粘贴图片，图片会随 Bug 一起保存。</small>
             </label>
             <label class="full">
                 <span>附件</span>
-                <input type="file" name="attachments" multiple accept="image/*,.log,.txt,.zip,.json" data-paste-file-input>
-                <div class="paste-upload-box" data-paste-upload>
-                    <textarea
-                        class="paste-capture-input"
-                        data-paste-capture
-                        rows="1"
-                        aria-label="附件粘贴区"
-                        autocomplete="off"
-                        autocorrect="off"
-                        autocapitalize="off"
-                        spellcheck="false"
-                    ></textarea>
-                    <div class="paste-upload-content">
-                        <strong>支持直接粘贴图片</strong>
-                        <span>在这里按 `Ctrl+V` / `Command+V` 粘贴截图，或直接在上面的输入框中粘贴图片。</span>
-                    </div>
-                </div>
-                <div class="paste-file-list" data-paste-file-list hidden></div>
-                <small class="field-tip">支持继续补充图片、日志、文本和压缩包。</small>
+                <input type="file" name="attachments" multiple accept="video/*,.log,.txt,.zip,.json,.pdf,.doc,.docx,.xls,.xlsx" data-paste-file-input>
+                <small class="field-tip">附件用于上传文件、视频、日志、文本和压缩包；图片请直接粘贴到上方图文框。</small>
             </label>
             <div class="full detail-edit-attachments">
                 <span>当前附件</span>
-                {% if attachments %}
+                {% if general_attachments %}
                     <div class="attachment-list">
-                        {% for item in attachments %}
+                        {% for item in general_attachments %}
                         <a class="attachment-card compact" href="{{ url_for('view_attachment', attachment_id=item.id) }}" target="_blank" rel="noopener noreferrer" title="{{ item.filename }}">
                             <div class="attachment-card-main">
                                 <span class="attachment-badge">
@@ -225,14 +229,14 @@
         </form>
     {% elif active_tab == "detail" %}
         <div class="info-grid">
-            <div class="info-item wide"><b>标题</b><span>{{ bug.title }}</span></div>
+            <div class="info-item wide"><b>标题</b><div class="info-value">{{ bug.title }}{{ inline_attachment_gallery(attachments_by_field.title) }}</div></div>
             <div class="info-item"><b>编号</b><span>{{ format_bug_no(bug.bug_no or bug.id) }}</span></div>
             <div class="info-item"><b>创建人</b><span>{{ bug.creator_name }}</span></div>
             <div class="info-item"><b>当前处理人</b><span>{{ bug.assignee_name }}</span></div>
             <div class="info-item"><b>创建时间</b><span>{{ bug.created_at }}</span></div>
             <div class="info-item"><b>更新时间</b><span>{{ bug.updated_at }}</span></div>
             <div class="info-item"><b>项目</b><span>{{ bug.project_name }}</span></div>
-            <div class="info-item"><b>版本</b><span>{{ bug.version or "-" }}</span></div>
+            <div class="info-item"><b>版本</b><div class="info-value">{{ bug.version or "-" }}{{ inline_attachment_gallery(attachments_by_field.version) }}</div></div>
             <div class="info-item">
                 <b>端</b>
                 <span>
@@ -282,15 +286,15 @@
             </div>
             <div class="info-item"><b>关联需求</b><span>{% if bug.requirement_id %}<a class="table-link" href="{{ url_for('requirement_detail', requirement_id=bug.requirement_id) }}">{{ bug.requirement_title or bug.requirement_code or "-" }}</a><br>{{ bug.requirement_code or "" }}{% else %}-{% endif %}</span></div>
             <div class="info-item"><b>关联用例</b><span>{{ bug.case_no or "-" }}<br>{{ bug.case_title or "" }}</span></div>
-            <div class="info-item wide"><b>环境信息</b><span>{{ bug.environment or "未填写" }}</span></div>
-            <div class="text-item"><b>详细描述</b><div>{{ bug.description }}</div></div>
-            <div class="text-item"><b>期望结果</b><div>{{ bug.expected_result or "未填写" }}</div></div>
-            <div class="text-item"><b>实际结果</b><div>{{ bug.actual_result or "未填写" }}</div></div>
+            <div class="info-item wide"><b>环境信息</b><div class="info-value">{{ bug.environment or "未填写" }}{{ inline_attachment_gallery(attachments_by_field.environment) }}</div></div>
+            <div class="text-item"><b>详细描述</b><div>{{ bug.description }}{{ inline_attachment_gallery(attachments_by_field.description) }}</div></div>
+            <div class="text-item"><b>期望结果</b><div>{{ bug.expected_result or "未填写" }}{{ inline_attachment_gallery(attachments_by_field.expected_result) }}</div></div>
+            <div class="text-item"><b>实际结果</b><div>{{ bug.actual_result or "未填写" }}{{ inline_attachment_gallery(attachments_by_field.actual_result) }}</div></div>
             <div class="text-item"><b>解决说明</b><div>{{ bug.resolution_note or "暂无" }}</div></div>
             <div class="text-item wide"><b>附件</b><div>
-                {% if attachments %}
+                {% if general_attachments %}
                     <div class="attachment-list">
-                        {% for item in attachments %}
+                        {% for item in general_attachments %}
                         <a class="attachment-card compact" href="{{ url_for('view_attachment', attachment_id=item.id) }}" target="_blank" rel="noopener noreferrer" title="{{ item.filename }}">
                             <div class="attachment-card-main">
                                 <span class="attachment-badge">

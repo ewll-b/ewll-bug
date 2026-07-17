@@ -276,7 +276,7 @@
             <h3 id="create-bug-modal-title">新建Bug</h3>
             <button class="modal-close-btn" type="button" aria-label="关闭" data-modal-close>×</button>
         </div>
-        <form class="form-grid modal-form bug-create-form" method="post" action="{{ url_for('create_bug') }}" enctype="multipart/form-data" data-async-bug-create>
+        <form class="form-grid modal-form bug-create-form" method="post" action="{{ url_for('create_bug') }}" enctype="multipart/form-data" data-bug-create-form data-async-bug-create data-draft-form data-draft-key="bug-create:{{ current_project.id if current_project else 'none' }}" novalidate>
             {% include "_bug_form_fields.html" %}
             <div class="form-actions full">
                 <button class="btn btn-primary" type="submit">创建Bug</button>

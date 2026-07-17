@@ -694,6 +694,48 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(attachment_response.status_code, 200)
         self.assertIn(attachment_response.mimetype, {"text/plain", "application/octet-stream"})
 
+    def test_create_bug_with_inline_image_source_shows_in_field(self) -> None:
+        self.login_as("lit", "123456")
+        response = self.client.post(
+            "/bugs/new",
+            data={
+                "title": "带字段截图的 Bug",
+                "version": "2.9.0",
+                "module": "APP",
+                "platform": "Android",
+                "severity": "高",
+                "assignee_id": "2",
+                "environment": "iOS",
+                "description": "这里应该展示截图",
+                "expected_result": "正常执行",
+                "actual_result": "发生异常",
+                "inline_image_sources": "description",
+                "inline_images": [
+                    (io.BytesIO(b"fake png"), "screen.png"),
+                ],
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            bug = conn.execute("SELECT id FROM bugs WHERE title = ?", ("带字段截图的 Bug",)).fetchone()
+            attachment = conn.execute(
+                "SELECT source_field FROM bug_attachments WHERE bug_id = ?",
+                (bug["id"],),
+            ).fetchone()
+
+        self.assertEqual(attachment["source_field"], "description")
+        detail = self.client.get(f"/bugs/{bug['id']}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn(b"inline-attachment-gallery", detail.data)
+        self.assertIn(b"data-image-preview-src", detail.data)
+        self.assertIn("暂无附件".encode("utf-8"), detail.data)
+        self.assertNotIn("图片已展示在对应字段".encode("utf-8"), detail.data)
+        self.assertNotIn(b"attachment-card compact", detail.data)
+
     @mock.patch("app.urllib_request.urlopen", side_effect=fake_group_report_urlopen)
     def test_create_bug_sends_project_group_notification(self, _mocked_urlopen) -> None:
         FakeGroupReportResponse.captured_requests = []

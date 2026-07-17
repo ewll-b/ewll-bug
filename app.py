@@ -68,6 +68,23 @@ BUG_PLATFORM_NOTIFY_KEY_MAP = {
     "后端": "Backend",
     "AI": "AI",
 }
+BUG_ATTACHMENT_SOURCE_FIELDS = {
+    "title",
+    "version",
+    "environment",
+    "description",
+    "expected_result",
+    "actual_result",
+    "attachments",
+}
+BUG_INLINE_ATTACHMENT_FIELDS = (
+    "title",
+    "version",
+    "environment",
+    "description",
+    "expected_result",
+    "actual_result",
+)
 REPORT_PLATFORM_LABELS = {
     "iOS": "IOS",
 }
@@ -625,6 +642,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             filename TEXT NOT NULL,
             stored_name TEXT NOT NULL,
             content_type TEXT,
+            source_field TEXT NOT NULL DEFAULT 'attachments',
             file_path TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
@@ -844,6 +862,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             ],
             "bug_comments": [
                 ("parent_id", "ALTER TABLE bug_comments ADD COLUMN parent_id INTEGER"),
+            ],
+            "bug_attachments": [
+                ("source_field", "ALTER TABLE bug_attachments ADD COLUMN source_field TEXT NOT NULL DEFAULT 'attachments'"),
             ],
             "requirements": [
                 ("version", "ALTER TABLE requirements ADD COLUMN version TEXT"),
@@ -2292,26 +2313,35 @@ def create_app(test_config: dict | None = None) -> Flask:
             ),
         )
 
-    def save_bug_attachments(db: sqlite3.Connection, bug_id: int, files: list) -> list[str]:
+    def normalize_attachment_source(source: object) -> str:
+        source_text = str(source or "").strip()
+        if source_text in BUG_ATTACHMENT_SOURCE_FIELDS:
+            return source_text
+        return "attachments"
+
+    def save_bug_attachments(db: sqlite3.Connection, bug_id: int, files: list, source_fields: list[str] | None = None) -> list[str]:
         upload_dir = Path(app.config["UPLOAD_FOLDER"])
         saved_names: list[str] = []
-        for file in files:
+        source_fields = source_fields or []
+        for index, file in enumerate(files):
             if file is None or not file.filename:
                 continue
+            source_field = normalize_attachment_source(source_fields[index] if index < len(source_fields) else "")
             original_name = secure_filename(file.filename) or f"attachment-{uuid.uuid4().hex}"
             stored_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex}{Path(original_name).suffix}"
             destination = upload_dir / stored_name
             file.save(destination)
             db.execute(
                 """
-                INSERT INTO bug_attachments (bug_id, filename, stored_name, content_type, file_path, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO bug_attachments (bug_id, filename, stored_name, content_type, source_field, file_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     bug_id,
                     file.filename,
                     stored_name,
                     file.mimetype or "application/octet-stream",
+                    source_field,
                     str(destination),
                     current_time(),
                 ),
@@ -2337,6 +2367,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             "expected_result": form.get("expected_result", "").strip(),
             "actual_result": form.get("actual_result", "").strip(),
             "attachments": files.getlist("attachments") if files else [],
+            "inline_images": files.getlist("inline_images") if files else [],
+            "inline_image_sources": form.getlist("inline_image_sources") if form else [],
         }
 
     def sync_users() -> None:
@@ -4436,9 +4468,23 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     def fetch_bug_attachments(bug_id: int) -> list[sqlite3.Row]:
         return get_db().execute(
-            "SELECT * FROM bug_attachments WHERE bug_id = ? ORDER BY created_at DESC, id DESC",
+            "SELECT * FROM bug_attachments WHERE bug_id = ? ORDER BY created_at ASC, id ASC",
             (bug_id,),
         ).fetchall()
+
+    def is_image_attachment(attachment: sqlite3.Row) -> bool:
+        return str(attachment["content_type"] or "").startswith("image/")
+
+    def group_bug_attachments(attachments: list[sqlite3.Row]) -> tuple[dict[str, list[sqlite3.Row]], list[sqlite3.Row]]:
+        attachments_by_field: dict[str, list[sqlite3.Row]] = {field: [] for field in BUG_INLINE_ATTACHMENT_FIELDS}
+        general_attachments: list[sqlite3.Row] = []
+        for attachment in attachments:
+            source_field = normalize_attachment_source(attachment["source_field"])
+            if source_field in attachments_by_field and is_image_attachment(attachment):
+                attachments_by_field[source_field].append(attachment)
+            else:
+                general_attachments.append(attachment)
+        return attachments_by_field, general_attachments
 
     def allowed_status_transitions(status: str) -> list[str]:
         return list(STATUS_LABELS.keys())
@@ -5456,6 +5502,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             expected_result = bug_form["expected_result"]
             actual_result = bug_form["actual_result"]
             attachments = bug_form["attachments"]
+            inline_images = bug_form["inline_images"]
+            inline_image_sources = bug_form["inline_image_sources"]
             if not all([title, version, module, platform, severity, assignee_id, description]):
                 if wants_json_response():
                     return jsonify({"ok": False, "message": "请完整填写必填项。"}), 400
@@ -5484,9 +5532,12 @@ def create_app(test_config: dict | None = None) -> Flask:
                 )
                 assignee_name = db.execute("SELECT name FROM users WHERE id = ?", (assignee_id,)).fetchone()["name"]
                 saved_names = save_bug_attachments(db, bug_id, attachments)
+                saved_inline_names = save_bug_attachments(db, bug_id, inline_images, inline_image_sources)
                 detail = f"{g.current_user['name']} 创建缺陷并指派给 {assignee_name}"
                 if saved_names:
                     detail += f"；上传附件 {len(saved_names)} 个"
+                if saved_inline_names:
+                    detail += f"；插入正文图片 {len(saved_inline_names)} 张"
                 add_history(
                     db,
                     bug_id,
@@ -5553,6 +5604,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             active_tab = "detail"
         history = fetch_bug_history(bug_id)
         comments = fetch_bug_comments(bug_id)
+        attachments = fetch_bug_attachments(bug_id)
+        attachments_by_field, general_attachments = group_bug_attachments(attachments)
         return render_template(
             "bug_detail.html",
             bug=bug,
@@ -5562,7 +5615,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             users=fetch_users(),
             requirements=fetch_requirements(),
             cases=fetch_cases_for_project(),
-            attachments=fetch_bug_attachments(bug_id),
+            attachments=attachments,
+            attachments_by_field=attachments_by_field,
+            general_attachments=general_attachments,
             active_tab=active_tab,
             back_url=back_url,
         )
@@ -5659,12 +5714,15 @@ def create_app(test_config: dict | None = None) -> Flask:
         expected_result = bug_form["expected_result"]
         actual_result = bug_form["actual_result"]
         attachments = bug_form["attachments"]
+        inline_images = bug_form["inline_images"]
+        inline_image_sources = bug_form["inline_image_sources"]
 
         if not all([title, version, module, platform, severity, assignee_id, description]):
             flash("请完整填写必填项。", "error")
             return redirect(url_for("bug_detail", bug_id=bug_id, tab="detail", edit="1", next=back_url))
 
         saved_names = save_bug_attachments(db, bug_id, attachments)
+        saved_inline_names = save_bug_attachments(db, bug_id, inline_images, inline_image_sources)
         previous_severity = str(bug["severity"] or "")
         previous_assignee_id = int(bug["assignee_id"] or 0)
         next_assignee_id = int(assignee_id)
@@ -5699,6 +5757,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         detail = f"{g.current_user['name']} 编辑了缺陷信息"
         if saved_names:
             detail += f"；新增附件 {len(saved_names)} 个"
+        if saved_inline_names:
+            detail += f"；插入正文图片 {len(saved_inline_names)} 张"
         target_user = fetch_user(next_assignee_id)
         add_history(
             db,

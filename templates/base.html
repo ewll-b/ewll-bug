@@ -130,6 +130,15 @@
     {% endif %}
 
     {% if request.endpoint != 'login' %}
+    <div class="image-preview-modal" id="image-preview-modal" hidden>
+        <div class="image-preview-backdrop" data-image-preview-close></div>
+        <div class="image-preview-card" role="dialog" aria-modal="true" aria-label="查看大图">
+            <button class="image-preview-close" type="button" data-image-preview-close aria-label="关闭">×</button>
+            <img alt="大图预览" data-image-preview-image>
+            <div class="image-preview-caption" data-image-preview-caption></div>
+        </div>
+    </div>
+
     <div class="confirm-modal" id="confirm-modal" hidden>
         <div class="confirm-modal-backdrop" data-confirm-cancel></div>
         <div class="confirm-modal-card" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
@@ -138,6 +147,19 @@
             <div class="confirm-modal-actions">
                 <button class="btn btn-secondary mini" type="button" data-confirm-cancel>取消</button>
                 <button class="btn btn-secondary mini danger-btn" type="button" id="confirm-modal-submit">确认删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="confirm-modal draft-confirm-modal" id="draft-confirm-modal" hidden>
+        <div class="confirm-modal-backdrop" data-draft-keep></div>
+        <div class="confirm-modal-card" role="dialog" aria-modal="true" aria-labelledby="draft-confirm-modal-title">
+            <h3 id="draft-confirm-modal-title">要保存草稿吗？</h3>
+            <p class="confirm-modal-text">离开当前编辑页面前，可以把本次内容保存为草稿，下次进入会自动恢复。</p>
+            <div class="confirm-modal-actions draft-confirm-actions">
+                <button class="btn btn-secondary mini" type="button" data-draft-keep>继续编辑</button>
+                <button class="btn btn-secondary mini danger-btn" type="button" data-draft-discard>不保存</button>
+                <button class="btn btn-primary mini" type="button" data-draft-save>保存草稿</button>
             </div>
         </div>
     </div>
@@ -671,12 +693,469 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     });
 
+    const draftStoragePrefix = "alvinsclub-bug-draft:";
+    const draftAdapters = new WeakMap();
+    const draftConfirmModal = document.getElementById("draft-confirm-modal");
+    let pendingDraftExit = null;
+    let draftExitApproved = false;
+
+    function allBlockingModalsClosed() {
+        return !document.querySelector(".floating-modal:not([hidden]), .confirm-modal:not([hidden]), .image-preview-modal:not([hidden])");
+    }
+
+    function draftStorageKey(form) {
+        const key = form && form.dataset ? form.dataset.draftKey : "";
+        if (key) {
+            return draftStoragePrefix + key;
+        }
+        const action = form ? (form.getAttribute("action") || window.location.pathname) : window.location.pathname;
+        return draftStoragePrefix + action;
+    }
+
+    function readStoredDraft(form) {
+        try {
+            const rawDraft = window.localStorage.getItem(draftStorageKey(form));
+            return rawDraft ? JSON.parse(rawDraft) : null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function removeStoredDraft(form) {
+        try {
+            window.localStorage.removeItem(draftStorageKey(form));
+        } catch (_error) {
+            return;
+        }
+    }
+
+    function collectBasicDraftFields(form) {
+        const fields = {};
+        form.querySelectorAll("input[name], textarea[name], select[name]").forEach(function (control) {
+            const name = control.getAttribute("name");
+            const type = (control.getAttribute("type") || "").toLowerCase();
+            if (!name || type === "file" || name === "inline_images" || name === "inline_image_sources") {
+                return;
+            }
+            if (!fields[name]) {
+                fields[name] = [];
+            }
+            fields[name].push({
+                type: type,
+                checked: Boolean(control.checked),
+                value: control.value || ""
+            });
+        });
+        return fields;
+    }
+
+    function applyBasicDraftFields(form, fields) {
+        if (!fields) {
+            return;
+        }
+        const fieldIndexes = {};
+        form.querySelectorAll("input[name], textarea[name], select[name]").forEach(function (control) {
+            const name = control.getAttribute("name");
+            const type = (control.getAttribute("type") || "").toLowerCase();
+            if (!name || type === "file" || name === "inline_images" || name === "inline_image_sources") {
+                return;
+            }
+            const values = fields[name];
+            if (!values || !values.length) {
+                return;
+            }
+            const index = fieldIndexes[name] || 0;
+            const value = values[Math.min(index, values.length - 1)];
+            fieldIndexes[name] = index + 1;
+            if (type === "checkbox" || type === "radio") {
+                control.checked = Boolean(value.checked);
+                return;
+            }
+            control.value = value.value || "";
+        });
+        refreshFormDropdownLabels(form);
+    }
+
+    function refreshFormDropdownLabels(form) {
+        form.querySelectorAll(".filter-dropdown").forEach(function (dropdown) {
+            const options = Array.from(dropdown.querySelectorAll("[data-filter-option]"));
+            if (!options.length) {
+                return;
+            }
+            const targetId = options[0].dataset.filterTarget;
+            const target = targetId ? document.getElementById(targetId) : null;
+            if (!target) {
+                return;
+            }
+            const activeOption = options.find(function (option) {
+                return (option.dataset.filterValue || "") === (target.value || "");
+            }) || options[0];
+            const labelNode = dropdown.querySelector("[data-filter-label]");
+            if (labelNode) {
+                labelNode.textContent = activeOption.dataset.filterLabel || activeOption.textContent.trim();
+            }
+            options.forEach(function (option) {
+                option.classList.toggle("active", option === activeOption);
+            });
+        });
+    }
+
+    const bugCreateRequiredFields = [
+        { name: "title", label: "标题" },
+        { name: "version", label: "版本" },
+        { name: "platform", label: "端" },
+        { name: "severity", label: "严重级别" },
+        { name: "assignee_id", label: "缺陷处理人" },
+        { name: "description", label: "问题描述" }
+    ];
+
+    function richEditorPlainText(editor) {
+        if (!editor) {
+            return "";
+        }
+        const clone = editor.cloneNode(true);
+        clone.querySelectorAll("[data-rich-file-id]").forEach(function (node) {
+            node.remove();
+        });
+        return (clone.innerText || clone.textContent || "").replace(/\u00a0/g, " ").trim();
+    }
+
+    function bugCreateFieldControl(form, fieldName) {
+        if (fieldName === "description") {
+            return form.querySelector('[data-rich-field="description"]')
+                || form.querySelector('[name="description"]');
+        }
+        const control = form.querySelector('[name="' + fieldName + '"]');
+        if (!control || control.type !== "hidden") {
+            return control;
+        }
+        const dropdown = control.nextElementSibling && control.nextElementSibling.matches(".filter-dropdown")
+            ? control.nextElementSibling
+            : control.closest("label") ? control.closest("label").querySelector(".filter-dropdown") : null;
+        return dropdown ? dropdown.querySelector(".filter-select") : control;
+    }
+
+    function bugCreateFieldValue(form, fieldName) {
+        if (fieldName === "description") {
+            const editor = form.querySelector('[data-rich-field="description"]');
+            if (editor) {
+                return richEditorPlainText(editor);
+            }
+        }
+        const control = form.querySelector('[name="' + fieldName + '"]');
+        return control ? (control.value || "").trim() : "";
+    }
+
+    function bugCreateFieldLabel(form, fieldName) {
+        const control = form.querySelector('[name="' + fieldName + '"]')
+            || form.querySelector('[data-rich-field="' + fieldName + '"]');
+        return control && typeof control.closest === "function" ? control.closest("label") : null;
+    }
+
+    function ensureBugCreateErrorMessage(label, fieldLabel) {
+        if (!label) {
+            return;
+        }
+        let message = label.querySelector("[data-required-error]");
+        if (!message) {
+            message = document.createElement("small");
+            message.className = "field-error-message";
+            message.dataset.requiredError = "1";
+            label.appendChild(message);
+        }
+        message.textContent = "请填写" + fieldLabel;
+    }
+
+    function clearBugCreateFieldInvalid(form, fieldName) {
+        const label = bugCreateFieldLabel(form, fieldName);
+        const target = bugCreateFieldControl(form, fieldName);
+        if (label) {
+            label.classList.remove("required-missing");
+            const message = label.querySelector("[data-required-error]");
+            if (message) {
+                message.remove();
+            }
+        }
+        if (target) {
+            target.classList.remove("required-missing-control");
+            target.removeAttribute("aria-invalid");
+        }
+    }
+
+    function clearBugCreateValidation(form) {
+        bugCreateRequiredFields.forEach(function (field) {
+            clearBugCreateFieldInvalid(form, field.name);
+        });
+    }
+
+    function markBugCreateFieldInvalid(form, field) {
+        const label = bugCreateFieldLabel(form, field.name);
+        const target = bugCreateFieldControl(form, field.name);
+        if (label) {
+            label.classList.add("required-missing");
+            ensureBugCreateErrorMessage(label, field.label);
+        }
+        if (target) {
+            target.classList.add("required-missing-control");
+            target.setAttribute("aria-invalid", "true");
+        }
+        return target;
+    }
+
+    function focusBugCreateInvalidField(target) {
+        if (!target) {
+            return;
+        }
+        target.scrollIntoView({ block: "center", behavior: "smooth" });
+        if (typeof target.focus === "function") {
+            window.setTimeout(function () {
+                target.focus({ preventScroll: true });
+            }, 180);
+        }
+    }
+
+    function validateBugCreateRequiredFields(form) {
+        if (!form || !form.matches("[data-bug-create-form]")) {
+            return true;
+        }
+        clearBugCreateValidation(form);
+        const missingFields = bugCreateRequiredFields.filter(function (field) {
+            return !bugCreateFieldValue(form, field.name);
+        });
+        if (!missingFields.length) {
+            return true;
+        }
+        let firstTarget = null;
+        missingFields.forEach(function (field) {
+            const target = markBugCreateFieldInvalid(form, field);
+            if (!firstTarget && target) {
+                firstTarget = target;
+            }
+        });
+        focusBugCreateInvalidField(firstTarget);
+        showToast("请完整填写必填项：" + missingFields.map(function (field) {
+            return field.label;
+        }).join("、"), "error");
+        return false;
+    }
+
+    document.querySelectorAll("[data-bug-create-form]").forEach(function (form) {
+        form.addEventListener("input", function (event) {
+            const target = event.target;
+            if (!target || !target.getAttribute) {
+                return;
+            }
+            const fieldName = target.dataset.richField || target.getAttribute("name");
+            if (fieldName) {
+                clearBugCreateFieldInvalid(form, fieldName);
+            }
+        });
+        form.addEventListener("change", function (event) {
+            const target = event.target;
+            if (!target || !target.getAttribute) {
+                return;
+            }
+            const fieldName = target.dataset.richField || target.getAttribute("name");
+            if (fieldName) {
+                clearBugCreateFieldInvalid(form, fieldName);
+            }
+        });
+        form.querySelectorAll("[data-filter-option]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                const targetId = button.dataset.filterTarget;
+                const target = targetId ? document.getElementById(targetId) : null;
+                if (target && target.getAttribute("name")) {
+                    window.setTimeout(function () {
+                        clearBugCreateFieldInvalid(form, target.getAttribute("name"));
+                    }, 0);
+                }
+            });
+        });
+    });
+
+    function defaultDraftSnapshot(form) {
+        return {
+            fields: collectBasicDraftFields(form),
+            inlineImages: [],
+            richContent: {}
+        };
+    }
+
+    function getDraftSnapshot(form) {
+        const adapter = draftAdapters.get(form);
+        if (adapter && typeof adapter.snapshot === "function") {
+            return adapter.snapshot();
+        }
+        return defaultDraftSnapshot(form);
+    }
+
+    function draftSnapshotText(form) {
+        try {
+            return JSON.stringify(getDraftSnapshot(form));
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    function isDraftFormVisible(form) {
+        return Boolean(form && !form.closest("[hidden]"));
+    }
+
+    function hasDraftChanges(form) {
+        if (!form || form.dataset.draftSubmitting === "1") {
+            return false;
+        }
+        if (form.querySelector(".required-missing")) {
+            return true;
+        }
+        return form.dataset.draftRestored === "1" || draftSnapshotText(form) !== (form.dataset.draftInitialSnapshot || "");
+    }
+
+    function dirtyVisibleDraftForms() {
+        return Array.from(document.querySelectorAll("form[data-draft-form]")).filter(function (form) {
+            return isDraftFormVisible(form) && hasDraftChanges(form);
+        });
+    }
+
+    function notifyRestoredDraft(root) {
+        const scope = root || document;
+        scope.querySelectorAll("form[data-draft-form][data-draft-restored='1']").forEach(function (form) {
+            if (form.dataset.draftNotified === "1" || !isDraftFormVisible(form)) {
+                return;
+            }
+            form.dataset.draftNotified = "1";
+            showToast("已恢复上次草稿。", "success");
+        });
+    }
+
+    async function saveFormDraft(form) {
+        const adapter = draftAdapters.get(form);
+        let payload = null;
+        try {
+            payload = adapter && typeof adapter.collect === "function"
+                ? await adapter.collect()
+                : defaultDraftSnapshot(form);
+            payload.savedAt = Date.now();
+            window.localStorage.setItem(draftStorageKey(form), JSON.stringify(payload));
+        } catch (_error) {
+            showToast("草稿保存失败，图片可能过大，请先提交或移除部分图片。", "error");
+            return false;
+        }
+        form.dataset.draftRestored = "1";
+        form.dataset.draftNotified = "1";
+        showToast("草稿已保存。", "success");
+        return true;
+    }
+
+    function clearFormDraft(form, options) {
+        const shouldReset = Boolean(options && options.reset);
+        const adapter = draftAdapters.get(form);
+        removeStoredDraft(form);
+        delete form.dataset.draftRestored;
+        delete form.dataset.draftNotified;
+        if (shouldReset) {
+            if (adapter && typeof adapter.reset === "function") {
+                adapter.reset();
+            } else {
+                form.reset();
+            }
+            window.setTimeout(function () {
+                refreshFormDropdownLabels(form);
+                form.dataset.draftInitialSnapshot = draftSnapshotText(form);
+            }, 0);
+            return;
+        }
+        form.dataset.draftInitialSnapshot = draftSnapshotText(form);
+    }
+
+    function closeDraftConfirmModal() {
+        if (!draftConfirmModal) {
+            return;
+        }
+        draftConfirmModal.hidden = true;
+        if (allBlockingModalsClosed()) {
+            document.body.classList.remove("modal-open");
+        }
+        pendingDraftExit = null;
+    }
+
+    function openDraftConfirmModal(form, action) {
+        if (!draftConfirmModal) {
+            action();
+            return;
+        }
+        pendingDraftExit = {
+            form: form,
+            action: action
+        };
+        draftConfirmModal.hidden = false;
+        document.body.classList.add("modal-open");
+    }
+
+    function requestDraftExit(form, action) {
+        if (!form || !hasDraftChanges(form)) {
+            action();
+            return;
+        }
+        openDraftConfirmModal(form, action);
+    }
+
+    function runApprovedDraftExit(action) {
+        draftExitApproved = true;
+        action();
+        window.setTimeout(function () {
+            draftExitApproved = false;
+        }, 1200);
+    }
+
+    async function restoreFormDraft(form, payload) {
+        const adapter = draftAdapters.get(form);
+        if (adapter && typeof adapter.restore === "function") {
+            await adapter.restore(payload);
+        } else {
+            applyBasicDraftFields(form, payload.fields);
+        }
+        form.dataset.draftRestored = "1";
+        notifyRestoredDraft(form.parentElement || document);
+    }
+
+    function initializeDraftForm(form, adapter) {
+        if (!form || form.dataset.draftInitialized === "1") {
+            return;
+        }
+        form.dataset.draftInitialized = "1";
+        draftAdapters.set(form, adapter || {});
+        refreshFormDropdownLabels(form);
+        form.dataset.draftInitialSnapshot = draftSnapshotText(form);
+        const storedDraft = readStoredDraft(form);
+        if (storedDraft) {
+            Promise.resolve(restoreFormDraft(form, storedDraft)).catch(function () {
+                showToast("草稿恢复失败，请重新编辑。", "error");
+            });
+        }
+        form.addEventListener("submit", function () {
+            form.dataset.draftSubmitting = "1";
+            if (form.matches("[data-async-bug-create]")) {
+                return;
+            }
+            clearFormDraft(form);
+        }, true);
+        form.addEventListener("reset", function () {
+            window.setTimeout(function () {
+                clearBugCreateValidation(form);
+                refreshFormDropdownLabels(form);
+                form.dataset.draftInitialSnapshot = draftSnapshotText(form);
+            }, 0);
+        });
+    }
+
     function openFloatingModal(modal) {
         if (!modal) {
             return;
         }
         modal.hidden = false;
         document.body.classList.add("modal-open");
+        notifyRestoredDraft(modal);
     }
 
     function closeFloatingModal(modal) {
@@ -684,7 +1163,9 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
         modal.hidden = true;
-        document.body.classList.remove("modal-open");
+        if (allBlockingModalsClosed()) {
+            document.body.classList.remove("modal-open");
+        }
     }
 
     document.querySelectorAll("[data-modal-open]").forEach(function (button) {
@@ -697,15 +1178,115 @@ document.addEventListener("DOMContentLoaded", function () {
 
     document.querySelectorAll(".floating-modal").forEach(function (modal) {
         modal.querySelectorAll("[data-modal-close]").forEach(function (button) {
-            button.addEventListener("click", function () {
-                closeFloatingModal(modal);
+            button.addEventListener("click", function (event) {
+                event.preventDefault();
+                const draftForm = modal.querySelector("form[data-draft-form]");
+                requestDraftExit(draftForm, function () {
+                    closeFloatingModal(modal);
+                });
             });
         });
     });
 
+    if (draftConfirmModal) {
+        draftConfirmModal.querySelectorAll("[data-draft-keep]").forEach(function (button) {
+            button.addEventListener("click", closeDraftConfirmModal);
+        });
+
+        const discardDraftButton = draftConfirmModal.querySelector("[data-draft-discard]");
+        if (discardDraftButton) {
+            discardDraftButton.addEventListener("click", function () {
+                if (!pendingDraftExit) {
+                    closeDraftConfirmModal();
+                    return;
+                }
+                const exitAction = pendingDraftExit.action;
+                clearFormDraft(pendingDraftExit.form, { reset: true });
+                closeDraftConfirmModal();
+                runApprovedDraftExit(exitAction);
+            });
+        }
+
+        const saveDraftButton = draftConfirmModal.querySelector("[data-draft-save]");
+        if (saveDraftButton) {
+            saveDraftButton.addEventListener("click", async function () {
+                if (!pendingDraftExit) {
+                    closeDraftConfirmModal();
+                    return;
+                }
+                const exitForm = pendingDraftExit.form;
+                const exitAction = pendingDraftExit.action;
+                const originalText = saveDraftButton.textContent;
+                saveDraftButton.disabled = true;
+                saveDraftButton.textContent = "保存中...";
+                const saved = await saveFormDraft(exitForm);
+                saveDraftButton.disabled = false;
+                saveDraftButton.textContent = originalText || "保存草稿";
+                if (!saved) {
+                    return;
+                }
+                closeDraftConfirmModal();
+                runApprovedDraftExit(exitAction);
+            });
+        }
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !draftConfirmModal.hidden) {
+                closeDraftConfirmModal();
+            }
+        });
+    }
+
+    document.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target : null;
+        const link = target ? target.closest("a[href]") : null;
+        if (!link || link.target === "_blank" || link.hasAttribute("download")) {
+            return;
+        }
+        const href = link.getAttribute("href") || "";
+        if (!href || href.charAt(0) === "#" || href.indexOf("javascript:") === 0 || href.indexOf("mailto:") === 0) {
+            return;
+        }
+        const dirtyForm = dirtyVisibleDraftForms()[0];
+        if (!dirtyForm) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        requestDraftExit(dirtyForm, function () {
+            window.location.href = link.href;
+        });
+    }, true);
+
+    window.addEventListener("beforeunload", function (event) {
+        if (draftExitApproved) {
+            return;
+        }
+        if (!dirtyVisibleDraftForms().length) {
+            return;
+        }
+        event.preventDefault();
+        event.returnValue = "";
+    });
+
+    document.querySelectorAll("[data-bug-create-form]:not([data-async-bug-create])").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+            if (!validateBugCreateRequiredFields(form)) {
+                delete form.dataset.draftSubmitting;
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        });
+    });
+
     document.querySelectorAll("[data-async-bug-create]").forEach(function (form) {
+        form.noValidate = true;
         form.addEventListener("submit", async function (event) {
             event.preventDefault();
+            if (!validateBugCreateRequiredFields(form)) {
+                delete form.dataset.draftSubmitting;
+                return;
+            }
             const submitButton = form.querySelector('button[type="submit"]');
             const originalText = submitButton ? submitButton.textContent : "";
             if (submitButton) {
@@ -726,10 +1307,12 @@ document.addEventListener("DOMContentLoaded", function () {
                     return { ok: false, message: "创建失败，请重试。" };
                 });
                 if (!response.ok || !data.ok) {
+                    validateBugCreateRequiredFields(form);
                     showToast(data.message || "创建失败，请重试。", "error");
                     return;
                 }
                 showToast(data.message || "创建成功", "success");
+                clearFormDraft(form);
                 form.reset();
                 closeFloatingModal(form.closest(".floating-modal"));
                 window.setTimeout(function () {
@@ -742,9 +1325,70 @@ document.addEventListener("DOMContentLoaded", function () {
                     submitButton.disabled = false;
                     submitButton.textContent = originalText || "创建Bug";
                 }
+                delete form.dataset.draftSubmitting;
             }
         });
     });
+
+    const imagePreviewModal = document.getElementById("image-preview-modal");
+    const imagePreviewImage = imagePreviewModal ? imagePreviewModal.querySelector("[data-image-preview-image]") : null;
+    const imagePreviewCaption = imagePreviewModal ? imagePreviewModal.querySelector("[data-image-preview-caption]") : null;
+
+    function hasOpenBlockingModal() {
+        return Boolean(document.querySelector(".floating-modal:not([hidden])"))
+            || Boolean(document.querySelector(".confirm-modal:not([hidden])"))
+            || Boolean(document.querySelector(".image-preview-modal:not([hidden])"));
+    }
+
+    function openImagePreview(src, title) {
+        if (!imagePreviewModal || !imagePreviewImage || !src) {
+            return;
+        }
+        imagePreviewImage.src = src;
+        imagePreviewImage.alt = title || "大图预览";
+        if (imagePreviewCaption) {
+            imagePreviewCaption.textContent = title || "";
+            imagePreviewCaption.hidden = !title;
+        }
+        imagePreviewModal.hidden = false;
+        document.body.classList.add("modal-open");
+    }
+
+    function closeImagePreview() {
+        if (!imagePreviewModal || !imagePreviewImage) {
+            return;
+        }
+        imagePreviewModal.hidden = true;
+        imagePreviewImage.removeAttribute("src");
+        if (imagePreviewCaption) {
+            imagePreviewCaption.textContent = "";
+            imagePreviewCaption.hidden = true;
+        }
+        if (!hasOpenBlockingModal()) {
+            document.body.classList.remove("modal-open");
+        }
+    }
+
+    if (imagePreviewModal) {
+        imagePreviewModal.querySelectorAll("[data-image-preview-close]").forEach(function (button) {
+            button.addEventListener("click", closeImagePreview);
+        });
+
+        document.addEventListener("click", function (event) {
+            const previewTarget = event.target.closest("[data-image-preview-src]");
+            if (!previewTarget) {
+                return;
+            }
+            event.preventDefault();
+            openImagePreview(previewTarget.dataset.imagePreviewSrc, previewTarget.dataset.imagePreviewTitle || previewTarget.getAttribute("title") || "");
+        });
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !imagePreviewModal.hidden) {
+                closeImagePreview();
+            }
+        });
+    }
 
     document.querySelectorAll("form[enctype='multipart/form-data']").forEach(function (form) {
         const fileInput = form.querySelector("[data-paste-file-input]");
@@ -752,14 +1396,287 @@ document.addEventListener("DOMContentLoaded", function () {
         const pasteCapture = form.querySelector("[data-paste-capture]");
         const fileList = form.querySelector("[data-paste-file-list]");
         const pasteTargets = Array.from(form.querySelectorAll("[data-paste-image-target]"));
+        const previewLists = Array.from(form.querySelectorAll("[data-paste-preview-for]"));
+        const richEditors = Array.from(form.querySelectorAll("[data-rich-paste-editor]"));
         if (!fileInput) {
             return;
         }
 
         const dataTransfer = new DataTransfer();
+        const fileSources = [];
+        const previewUrls = [];
+        const fileClientIds = [];
+        const fileDraftDataUrls = [];
+        let nextFileClientId = 1;
+        const inlineImageInput = document.createElement("input");
+        inlineImageInput.type = "file";
+        inlineImageInput.name = "inline_images";
+        inlineImageInput.multiple = true;
+        inlineImageInput.hidden = true;
+        fileInput.insertAdjacentElement("afterend", inlineImageInput);
+        const sourceInputList = document.createElement("div");
+        sourceInputList.hidden = true;
+        inlineImageInput.insertAdjacentElement("afterend", sourceInputList);
+
+        const sourceLabels = {
+            title: "标题",
+            version: "版本",
+            environment: "环境信息",
+            description: "问题描述",
+            expected_result: "期望结果",
+            actual_result: "实际结果",
+            attachments: "附件"
+        };
+
+        function normalizeSourceField(sourceField) {
+            return Object.prototype.hasOwnProperty.call(sourceLabels, sourceField) ? sourceField : "attachments";
+        }
+
+        function sourceLabelFor(sourceField) {
+            return sourceLabels[normalizeSourceField(sourceField)] || "附件";
+        }
+
+        function sourceFieldHasRichEditor(sourceField) {
+            const normalizedSource = normalizeSourceField(sourceField);
+            return richEditors.some(function (editor) {
+                return editor.dataset.richField === normalizedSource;
+            });
+        }
+
+        function sourceForRichEditor(editor) {
+            return normalizeSourceField(editor && editor.dataset ? editor.dataset.richField : "");
+        }
+
+        function sourceInputForRichEditor(editor) {
+            const sourceField = sourceForRichEditor(editor);
+            return form.querySelector('[data-rich-source="' + sourceField + '"]');
+        }
+
+        function extractRichEditorText(editor) {
+            const clone = editor.cloneNode(true);
+            clone.querySelectorAll("[data-rich-file-id]").forEach(function (node) {
+                node.remove();
+            });
+            return (clone.innerText || clone.textContent || "").replace(/\u00a0/g, " ").trim();
+        }
+
+        function syncRichEditorSource(editor) {
+            const sourceInput = sourceInputForRichEditor(editor);
+            if (sourceInput) {
+                sourceInput.value = extractRichEditorText(editor);
+            }
+        }
+
+        function syncRichEditorSources() {
+            richEditors.forEach(syncRichEditorSource);
+        }
+
+        function setRichEditorText(editor, value) {
+            editor.textContent = value || "";
+            syncRichEditorSource(editor);
+        }
+
+        function insertNodeAtSelection(editor, node) {
+            editor.focus({ preventScroll: true });
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount || !editor.contains(selection.anchorNode)) {
+                editor.appendChild(node);
+                editor.appendChild(document.createTextNode(" "));
+                return;
+            }
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(node);
+            const spacer = document.createTextNode(" ");
+            node.after(spacer);
+            range.setStartAfter(spacer);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+
+        function insertPlainTextAtSelection(editor, text) {
+            if (!text) {
+                return;
+            }
+            insertNodeAtSelection(editor, document.createTextNode(text));
+            syncRichEditorSource(editor);
+        }
+
+        function createRichImageNode(file, previewUrl, clientId) {
+            const wrapper = document.createElement("span");
+            wrapper.className = "rich-inline-image";
+            wrapper.contentEditable = "false";
+            wrapper.dataset.richFileId = clientId;
+            wrapper.dataset.imagePreviewSrc = previewUrl;
+            wrapper.dataset.imagePreviewTitle = file.name;
+            wrapper.setAttribute("role", "button");
+            wrapper.setAttribute("tabindex", "0");
+            wrapper.setAttribute("aria-label", "查看大图：" + file.name);
+
+            const image = document.createElement("img");
+            image.src = previewUrl;
+            image.alt = file.name;
+
+            const removeButton = document.createElement("button");
+            removeButton.type = "button";
+            removeButton.className = "rich-inline-image-remove";
+            removeButton.textContent = "×";
+            removeButton.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                const currentIndex = fileClientIds.indexOf(clientId);
+                if (currentIndex >= 0) {
+                    removeFileAt(currentIndex);
+                }
+            });
+
+            wrapper.addEventListener("keydown", function (event) {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openImagePreview(previewUrl, file.name);
+                }
+            });
+
+            wrapper.appendChild(image);
+            wrapper.appendChild(removeButton);
+            return wrapper;
+        }
+
+        function insertRichImages(editor, addedItems) {
+            addedItems.forEach(function (item) {
+                if (!item.previewUrl) {
+                    return;
+                }
+                insertNodeAtSelection(editor, createRichImageNode(item.file, item.previewUrl, item.clientId));
+            });
+            syncRichEditorSource(editor);
+        }
+
+        function getPreviewUrl(file) {
+            if (!file || !file.type || file.type.indexOf("image/") !== 0) {
+                return "";
+            }
+            return URL.createObjectURL(file);
+        }
+
+        function fileToDataUrl(file) {
+            return new Promise(function (resolve, reject) {
+                const reader = new FileReader();
+                reader.addEventListener("load", function () {
+                    resolve(typeof reader.result === "string" ? reader.result : "");
+                });
+                reader.addEventListener("error", reject);
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function dataUrlToFile(dataUrl, filename, contentType) {
+            const response = await fetch(dataUrl);
+            const blob = await response.blob();
+            return new File([blob], filename || "draft-image.png", { type: contentType || blob.type || "image/png" });
+        }
+
+        function revokePreviewUrl(url) {
+            if (url) {
+                URL.revokeObjectURL(url);
+            }
+        }
+
+        function removeFileAt(index) {
+            const nextTransfer = new DataTransfer();
+            const nextSources = [];
+            const nextPreviewUrls = [];
+            const nextClientIds = [];
+            const nextDraftDataUrls = [];
+            const removedClientId = fileClientIds[index];
+            Array.from(dataTransfer.files).forEach(function (currentFile, currentIndex) {
+                if (currentIndex === index) {
+                    revokePreviewUrl(previewUrls[currentIndex]);
+                    return;
+                }
+                nextTransfer.items.add(currentFile);
+                nextSources.push(fileSources[currentIndex] || "attachments");
+                nextPreviewUrls.push(previewUrls[currentIndex] || "");
+                nextClientIds.push(fileClientIds[currentIndex]);
+                nextDraftDataUrls.push(fileDraftDataUrls[currentIndex] || "");
+            });
+            if (removedClientId) {
+                form.querySelectorAll('[data-rich-file-id="' + removedClientId + '"]').forEach(function (node) {
+                    node.remove();
+                });
+            }
+            dataTransfer.items.clear();
+            Array.from(nextTransfer.files).forEach(function (currentFile) {
+                dataTransfer.items.add(currentFile);
+            });
+            fileSources.splice(0, fileSources.length, ...nextSources);
+            previewUrls.splice(0, previewUrls.length, ...nextPreviewUrls);
+            fileClientIds.splice(0, fileClientIds.length, ...nextClientIds);
+            fileDraftDataUrls.splice(0, fileDraftDataUrls.length, ...nextDraftDataUrls);
+            syncRichEditorSources();
+            syncFiles();
+        }
+
+        function appendRemoveButton(container, index) {
+            const removeButton = document.createElement("button");
+            removeButton.className = "paste-file-remove";
+            removeButton.type = "button";
+            removeButton.textContent = "×";
+            removeButton.addEventListener("click", function () {
+                removeFileAt(index);
+            });
+            container.appendChild(removeButton);
+        }
+
+        function syncSourceInputs() {
+            sourceInputList.innerHTML = "";
+            fileSources.forEach(function (sourceField) {
+                const sourceInput = document.createElement("input");
+                sourceInput.type = "hidden";
+                sourceInput.name = "inline_image_sources";
+                sourceInput.value = normalizeSourceField(sourceField);
+                sourceInputList.appendChild(sourceInput);
+            });
+        }
+
+        function syncInlinePreviews() {
+            previewLists.forEach(function (previewList) {
+                previewList.innerHTML = "";
+                previewList.hidden = true;
+            });
+            Array.from(dataTransfer.files).forEach(function (file, index) {
+                const sourceField = normalizeSourceField(fileSources[index] || "attachments");
+                if (sourceField === "attachments" || sourceFieldHasRichEditor(sourceField) || !previewUrls[index]) {
+                    return;
+                }
+                const previewList = form.querySelector('[data-paste-preview-for="' + sourceField + '"]');
+                if (!previewList) {
+                    return;
+                }
+                previewList.hidden = false;
+
+                const previewItem = document.createElement("div");
+                previewItem.className = "paste-inline-preview-item";
+
+                const image = document.createElement("img");
+                image.src = previewUrls[index];
+                image.alt = file.name;
+
+                const caption = document.createElement("span");
+                caption.textContent = file.name;
+
+                previewItem.appendChild(image);
+                previewItem.appendChild(caption);
+                appendRemoveButton(previewItem, index);
+                previewList.appendChild(previewItem);
+            });
+        }
 
         function syncFiles() {
-            fileInput.files = dataTransfer.files;
+            inlineImageInput.files = dataTransfer.files;
+            syncSourceInputs();
+            syncInlinePreviews();
             if (!fileList) {
                 return;
             }
@@ -768,47 +1685,76 @@ document.addEventListener("DOMContentLoaded", function () {
                 fileList.hidden = true;
                 return;
             }
-            fileList.hidden = false;
+            let renderedCount = 0;
             Array.from(dataTransfer.files).forEach(function (file, index) {
+                const sourceField = normalizeSourceField(fileSources[index] || "attachments");
+                if (sourceFieldHasRichEditor(sourceField) && previewUrls[index]) {
+                    return;
+                }
                 const item = document.createElement("div");
                 item.className = "paste-file-item";
+
+                const main = document.createElement("div");
+                main.className = "paste-file-main";
+
+                if (previewUrls[index]) {
+                    const thumbnail = document.createElement("img");
+                    thumbnail.className = "paste-file-thumb";
+                    thumbnail.src = previewUrls[index];
+                    thumbnail.alt = file.name;
+                    main.appendChild(thumbnail);
+                }
+
+                const meta = document.createElement("div");
+                meta.className = "paste-file-meta";
 
                 const name = document.createElement("span");
                 name.className = "paste-file-name";
                 name.textContent = file.name;
 
-                const removeButton = document.createElement("button");
-                removeButton.className = "paste-file-remove";
-                removeButton.type = "button";
-                removeButton.textContent = "×";
-                removeButton.addEventListener("click", function () {
-                    const nextTransfer = new DataTransfer();
-                    Array.from(dataTransfer.files).forEach(function (currentFile, currentIndex) {
-                        if (currentIndex !== index) {
-                            nextTransfer.items.add(currentFile);
-                        }
-                    });
-                    dataTransfer.items.clear();
-                    Array.from(nextTransfer.files).forEach(function (currentFile) {
-                        dataTransfer.items.add(currentFile);
-                    });
-                    syncFiles();
-                });
+                const source = document.createElement("span");
+                source.className = "paste-file-source";
+                source.textContent = sourceLabelFor(sourceField);
 
-                item.appendChild(name);
-                item.appendChild(removeButton);
+                meta.appendChild(name);
+                meta.appendChild(source);
+                main.appendChild(meta);
+                item.appendChild(main);
+                appendRemoveButton(item, index);
                 fileList.appendChild(item);
+                renderedCount += 1;
             });
+            fileList.hidden = renderedCount === 0;
         }
 
-        function addFiles(files) {
+        function addFileItem(file, sourceField, draftDataUrl, clientId) {
+            const normalizedSource = normalizeSourceField(sourceField || "attachments");
+            const previewUrl = getPreviewUrl(file) || draftDataUrl || "";
+            const nextClientId = clientId || ("paste-file-" + Date.now() + "-" + nextFileClientId);
+            nextFileClientId += 1;
+            dataTransfer.items.add(file);
+            fileSources.push(normalizedSource);
+            previewUrls.push(previewUrl);
+            fileClientIds.push(nextClientId);
+            fileDraftDataUrls.push(draftDataUrl || "");
+            return {
+                clientId: nextClientId,
+                file: file,
+                previewUrl: previewUrl,
+                sourceField: normalizedSource
+            };
+        }
+
+        function addFiles(files, sourceField) {
+            const addedItems = [];
             Array.from(files || []).forEach(function (file) {
                 if (!file) {
                     return;
                 }
-                dataTransfer.items.add(file);
+                addedItems.push(addFileItem(file, sourceField));
             });
             syncFiles();
+            return addedItems;
         }
 
         function flashPasteBox() {
@@ -838,16 +1784,68 @@ document.addEventListener("DOMContentLoaded", function () {
                 .filter(Boolean);
         }
 
-        function handleImagePaste(event, sourceLabel) {
+        function handleImagePaste(event, sourceLabel, sourceField, targetEditor) {
             const pastedImages = getPastedImages(event);
             if (!pastedImages.length) {
                 return false;
             }
             event.preventDefault();
-            addFiles(pastedImages);
+            const addedItems = addFiles(pastedImages, sourceField);
+            if (targetEditor) {
+                insertRichImages(targetEditor, addedItems);
+            }
             flashPasteBox();
-            showToast((sourceLabel || "当前输入框") + " 的图片已添加到附件。", "success");
+            showToast((sourceLabel || "当前输入框") + " 的图片已添加。", "success");
             return true;
+        }
+
+        function getPasteSourceLabel(target) {
+            if (!target || typeof target.closest !== "function") {
+                return "当前输入框";
+            }
+            if (target.dataset && target.dataset.pasteImageTarget) {
+                return target.dataset.pasteImageTarget;
+            }
+            const label = target.closest("label");
+            if (label) {
+                const labelText = label.querySelector("span");
+                if (labelText && labelText.textContent.trim()) {
+                    return labelText.textContent.trim();
+                }
+            }
+            const ariaLabel = typeof target.getAttribute === "function" ? target.getAttribute("aria-label") : "";
+            if (ariaLabel) {
+                return ariaLabel;
+            }
+            const placeholder = typeof target.getAttribute === "function" ? target.getAttribute("placeholder") : "";
+            if (placeholder) {
+                return placeholder;
+            }
+            return "当前输入框";
+        }
+
+        function getPasteSourceField(target) {
+            if (!target || typeof target.closest !== "function") {
+                return "attachments";
+            }
+            const isPasteCapture = typeof target.hasAttribute === "function" && target.hasAttribute("data-paste-capture");
+            if (target.closest("[data-paste-upload]") || isPasteCapture) {
+                return "attachments";
+            }
+            const richEditor = target.closest("[data-rich-paste-editor]");
+            if (richEditor) {
+                return sourceForRichEditor(richEditor);
+            }
+            const targetName = typeof target.getAttribute === "function" ? target.getAttribute("name") : "";
+            return normalizeSourceField(targetName || "attachments");
+        }
+
+        function isAttachmentPasteTarget(target) {
+            if (!target || typeof target.closest !== "function") {
+                return false;
+            }
+            const field = target.closest("label");
+            return Boolean(field && field.querySelector("[data-paste-file-input]"));
         }
 
         function focusPasteCapture() {
@@ -861,31 +1859,255 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         }
 
-        fileInput.addEventListener("change", function () {
-            const nextTransfer = new DataTransfer();
-            Array.from(dataTransfer.files).forEach(function (file) {
-                nextTransfer.items.add(file);
-            });
-            Array.from(fileInput.files || []).forEach(function (file) {
-                nextTransfer.items.add(file);
-            });
+        function clearInlineDraftImages() {
+            previewUrls.forEach(revokePreviewUrl);
             dataTransfer.items.clear();
-            Array.from(nextTransfer.files).forEach(function (file) {
-                dataTransfer.items.add(file);
+            fileSources.splice(0, fileSources.length);
+            previewUrls.splice(0, previewUrls.length);
+            fileClientIds.splice(0, fileClientIds.length);
+            fileDraftDataUrls.splice(0, fileDraftDataUrls.length);
+            form.querySelectorAll("[data-rich-file-id]").forEach(function (node) {
+                node.remove();
+            });
+            syncRichEditorSources();
+            syncFiles();
+        }
+
+        function serializeRichNode(node, parts) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                if (node.textContent) {
+                    parts.push({
+                        type: "text",
+                        text: node.textContent
+                    });
+                }
+                return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) {
+                return;
+            }
+            if (node.matches("[data-rich-file-id]")) {
+                parts.push({
+                    type: "image",
+                    clientId: node.dataset.richFileId || ""
+                });
+                return;
+            }
+            if (node.tagName === "BR") {
+                parts.push({
+                    type: "text",
+                    text: "\n"
+                });
+                return;
+            }
+            Array.from(node.childNodes).forEach(function (childNode) {
+                serializeRichNode(childNode, parts);
+            });
+            if (["DIV", "P"].indexOf(node.tagName) >= 0) {
+                parts.push({
+                    type: "text",
+                    text: "\n"
+                });
+            }
+        }
+
+        function serializeRichEditor(editor) {
+            const parts = [];
+            Array.from(editor.childNodes).forEach(function (node) {
+                serializeRichNode(node, parts);
+            });
+            return parts;
+        }
+
+        function collectRichDraftContent() {
+            const content = {};
+            richEditors.forEach(function (editor) {
+                syncRichEditorSource(editor);
+                content[sourceForRichEditor(editor)] = serializeRichEditor(editor);
+            });
+            return content;
+        }
+
+        function collectInlineImageDraftMeta() {
+            const files = Array.from(dataTransfer.files);
+            return files.map(function (file, index) {
+                const sourceField = normalizeSourceField(fileSources[index] || "attachments");
+                if (!sourceFieldHasRichEditor(sourceField) || !previewUrls[index]) {
+                    return null;
+                }
+                return {
+                    clientId: fileClientIds[index],
+                    filename: file.name,
+                    type: file.type || "image/png",
+                    size: file.size || 0,
+                    sourceField: sourceField
+                };
+            }).filter(Boolean);
+        }
+
+        function collectDraftSnapshot() {
+            syncRichEditorSources();
+            return {
+                version: 1,
+                fields: collectBasicDraftFields(form),
+                inlineImages: collectInlineImageDraftMeta(),
+                richContent: collectRichDraftContent()
+            };
+        }
+
+        async function collectDraftPayload() {
+            const payload = collectDraftSnapshot();
+            const files = Array.from(dataTransfer.files);
+            payload.inlineImages = await Promise.all(payload.inlineImages.map(async function (image) {
+                const index = fileClientIds.indexOf(image.clientId);
+                const file = index >= 0 ? files[index] : null;
+                let dataUrl = index >= 0 ? fileDraftDataUrls[index] : "";
+                if (!dataUrl && file) {
+                    dataUrl = await fileToDataUrl(file);
+                    fileDraftDataUrls[index] = dataUrl;
+                }
+                return Object.assign({}, image, {
+                    dataUrl: dataUrl
+                });
+            }));
+            return payload;
+        }
+
+        function appendRichDraftPart(editor, part, imageMap) {
+            if (!part) {
+                return;
+            }
+            if (part.type === "image") {
+                const imageItem = imageMap[part.clientId || ""];
+                if (!imageItem || !imageItem.previewUrl) {
+                    return;
+                }
+                editor.appendChild(createRichImageNode(imageItem.file, imageItem.previewUrl, imageItem.clientId));
+                editor.appendChild(document.createTextNode(" "));
+                return;
+            }
+            if (part.text) {
+                editor.appendChild(document.createTextNode(part.text));
+            }
+        }
+
+        async function restoreDraftPayload(payload) {
+            clearInlineDraftImages();
+            applyBasicDraftFields(form, payload.fields);
+            const imageMap = {};
+            const draftImages = Array.isArray(payload.inlineImages) ? payload.inlineImages : [];
+            for (const image of draftImages) {
+                if (!image || !image.dataUrl) {
+                    continue;
+                }
+                const file = await dataUrlToFile(image.dataUrl, image.filename, image.type);
+                imageMap[image.clientId] = addFileItem(file, image.sourceField, image.dataUrl, image.clientId);
+            }
+            syncFiles();
+            richEditors.forEach(function (editor) {
+                const sourceField = sourceForRichEditor(editor);
+                const parts = payload.richContent && Array.isArray(payload.richContent[sourceField])
+                    ? payload.richContent[sourceField]
+                    : null;
+                editor.innerHTML = "";
+                if (parts && parts.length) {
+                    parts.forEach(function (part) {
+                        appendRichDraftPart(editor, part, imageMap);
+                    });
+                    syncRichEditorSource(editor);
+                    return;
+                }
+                const sourceInput = sourceInputForRichEditor(editor);
+                setRichEditorText(editor, sourceInput ? sourceInput.value : "");
             });
             syncFiles();
+        }
+
+        function resetDraftPayload() {
+            form.reset();
+        }
+
+        fileInput.addEventListener("change", function () {
+            syncFiles();
+        });
+
+        richEditors.forEach(function (editor) {
+            const sourceInput = sourceInputForRichEditor(editor);
+            setRichEditorText(editor, sourceInput ? sourceInput.value : "");
+
+            editor.addEventListener("input", function () {
+                syncRichEditorSource(editor);
+            });
+
+            editor.addEventListener("paste", function (event) {
+                const sourceField = sourceForRichEditor(editor);
+                const pastedImages = getPastedImages(event);
+                const pastedText = event.clipboardData ? event.clipboardData.getData("text/plain") : "";
+                if (pastedImages.length) {
+                    event.preventDefault();
+                    if (pastedText) {
+                        insertPlainTextAtSelection(editor, pastedText);
+                    }
+                    const addedItems = addFiles(pastedImages, sourceField);
+                    insertRichImages(editor, addedItems);
+                    flashPasteBox();
+                    showToast((editor.dataset.pasteImageTarget || "当前输入框") + " 的图片已插入。", "success");
+                    return;
+                }
+                if (pastedText) {
+                    event.preventDefault();
+                    insertPlainTextAtSelection(editor, pastedText);
+                }
+            });
         });
 
         pasteTargets.forEach(function (target) {
             target.addEventListener("paste", function (event) {
-                handleImagePaste(event, target.dataset.pasteImageTarget || "当前输入框");
+                if (target.matches("[data-rich-paste-editor]")) {
+                    return;
+                }
+                handleImagePaste(event, target.dataset.pasteImageTarget || "当前输入框", getPasteSourceField(target));
             });
         });
 
+        form.addEventListener("paste", function (event) {
+            if (event.defaultPrevented) {
+                return;
+            }
+            if (isAttachmentPasteTarget(event.target) && getPastedImages(event).length) {
+                event.preventDefault();
+                showToast("图片请直接粘贴到问题描述、期望结果或实际结果图文框内。", "error");
+                return;
+            }
+            handleImagePaste(event, getPasteSourceLabel(event.target), getPasteSourceField(event.target));
+        });
+
+        form.addEventListener("reset", function () {
+            window.setTimeout(function () {
+                previewUrls.forEach(revokePreviewUrl);
+                dataTransfer.items.clear();
+                fileSources.splice(0, fileSources.length);
+                previewUrls.splice(0, previewUrls.length);
+                fileClientIds.splice(0, fileClientIds.length);
+                fileDraftDataUrls.splice(0, fileDraftDataUrls.length);
+                richEditors.forEach(function (editor) {
+                    const sourceInput = sourceInputForRichEditor(editor);
+                    setRichEditorText(editor, sourceInput ? sourceInput.defaultValue : "");
+                });
+                syncFiles();
+            }, 0);
+        });
+
+        form.addEventListener("submit", function () {
+            syncRichEditorSources();
+        }, true);
+
         if (pasteCapture) {
             pasteCapture.addEventListener("paste", function (event) {
-                if (handleImagePaste(event, "附件区域")) {
+                if (getPastedImages(event).length) {
+                    event.preventDefault();
                     pasteCapture.value = "";
+                    showToast("图片请直接粘贴到问题描述、期望结果或实际结果图文框内。", "error");
                     return;
                 }
                 pasteCapture.value = "";
@@ -899,7 +2121,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
         if (pasteBox) {
             pasteBox.addEventListener("paste", function (event) {
-                if (handleImagePaste(event, "附件区域")) {
+                if (getPastedImages(event).length) {
+                    event.preventDefault();
+                    showToast("图片请直接粘贴到问题描述、期望结果或实际结果图文框内。", "error");
                     return;
                 }
                 showToast("未检测到图片内容，请先复制截图。", "error");
@@ -924,6 +2148,16 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         syncFiles();
+        initializeDraftForm(form, {
+            collect: collectDraftPayload,
+            reset: resetDraftPayload,
+            restore: restoreDraftPayload,
+            snapshot: collectDraftSnapshot
+        });
+    });
+
+    document.querySelectorAll("form[data-draft-form]").forEach(function (form) {
+        initializeDraftForm(form);
     });
 
     const modal = document.getElementById("confirm-modal");

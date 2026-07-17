@@ -30,10 +30,12 @@
 <label class="full">
     <span>标题</span>
     <input type="text" name="title" value="{{ form_values.title or '' }}" required>
+    <div class="paste-inline-preview" data-paste-preview-for="title" hidden></div>
 </label>
 <label>
     <span>版本</span>
     <input type="text" name="version" value="{{ form_values.version or '' }}" placeholder="如 2.6.0" required>
+    <div class="paste-inline-preview" data-paste-preview-for="version" hidden></div>
 </label>
 <label>
     <span>端</span>
@@ -119,41 +121,31 @@
 <label class="full">
     <span>环境信息</span>
     <input type="text" name="environment" value="{{ form_values.environment or '' }}">
+    <div class="paste-inline-preview" data-paste-preview-for="environment" hidden></div>
 </label>
 <label class="full">
     <span>问题描述</span>
-    <textarea name="description" rows="5" required data-paste-image-target="问题描述">{{ form_values.description or '' }}</textarea>
-    <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+    <textarea class="rich-paste-source" name="description" data-rich-source="description">{{ form_values.description or '' }}</textarea>
+    <div class="rich-paste-editor" role="textbox" aria-multiline="true" aria-required="true" contenteditable="true" data-rich-paste-editor data-rich-field="description" data-paste-image-target="问题描述" data-placeholder="请输入问题描述"></div>
+    <div class="paste-inline-preview" data-paste-preview-for="description" hidden></div>
+    <small class="field-tip">支持在框内输入文字和粘贴图片，图片会随 Bug 一起保存。</small>
 </label>
 <label class="full">
     <span>期望结果</span>
-    <textarea name="expected_result" rows="3" data-paste-image-target="期望结果">{{ form_values.expected_result or '' }}</textarea>
-    <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+    <textarea class="rich-paste-source" name="expected_result" data-rich-source="expected_result">{{ form_values.expected_result or '' }}</textarea>
+    <div class="rich-paste-editor compact" role="textbox" aria-multiline="true" contenteditable="true" data-rich-paste-editor data-rich-field="expected_result" data-paste-image-target="期望结果" data-placeholder="请输入期望结果"></div>
+    <div class="paste-inline-preview" data-paste-preview-for="expected_result" hidden></div>
+    <small class="field-tip">支持在框内输入文字和粘贴图片，图片会随 Bug 一起保存。</small>
 </label>
 <label class="full">
     <span>实际结果</span>
-    <textarea name="actual_result" rows="3" data-paste-image-target="实际结果">{{ form_values.actual_result or '' }}</textarea>
-    <small class="field-tip">支持直接在输入框内粘贴图片，粘贴后会自动加入附件。</small>
+    <textarea class="rich-paste-source" name="actual_result" data-rich-source="actual_result">{{ form_values.actual_result or '' }}</textarea>
+    <div class="rich-paste-editor compact" role="textbox" aria-multiline="true" contenteditable="true" data-rich-paste-editor data-rich-field="actual_result" data-paste-image-target="实际结果" data-placeholder="请输入实际结果"></div>
+    <div class="paste-inline-preview" data-paste-preview-for="actual_result" hidden></div>
+    <small class="field-tip">支持在框内输入文字和粘贴图片，图片会随 Bug 一起保存。</small>
 </label>
 <label class="full">
     <span>附件</span>
-    <input type="file" name="attachments" multiple accept="image/*,.log,.txt,.zip,.json" data-paste-file-input>
-    <div class="paste-upload-box" data-paste-upload>
-        <textarea
-            class="paste-capture-input"
-            data-paste-capture
-            rows="1"
-            aria-label="附件粘贴区"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-        ></textarea>
-        <div class="paste-upload-content">
-            <strong>支持直接粘贴图片</strong>
-            <span>在这里按 `Ctrl+V` / `Command+V` 粘贴截图，或继续使用下方附件选择。</span>
-        </div>
-    </div>
-    <div class="paste-file-list" data-paste-file-list hidden></div>
-    <small class="field-tip">支持图片、日志、文本和压缩包，可多选上传，也支持直接粘贴截图。</small>
+    <input type="file" name="attachments" multiple accept="video/*,.log,.txt,.zip,.json,.pdf,.doc,.docx,.xls,.xlsx" data-paste-file-input>
+    <small class="field-tip">附件用于上传文件、视频、日志、文本和压缩包；图片请直接粘贴到上方图文框。</small>
 </label>
