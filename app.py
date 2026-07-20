@@ -29,6 +29,7 @@ os.environ.setdefault("XDG_CACHE_HOME", "/private/tmp")
 
 import openpyxl
 from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 
@@ -6263,6 +6264,8 @@ def create_app(test_config: dict | None = None) -> Flask:
 
 
 app = create_app()
+# 让 Flask 正确识别 nginx 反向代理传入的子路径前缀。
+app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
 
 
 if __name__ == "__main__":
