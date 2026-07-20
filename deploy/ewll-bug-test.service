@@ -1,0 +1,15 @@
+[Unit]
+Description=EWLL Bug Platform test service
+After=network.target
+
+[Service]
+Type=simple
+User=echooo
+WorkingDirectory=/home/echooo/fed/ewll-bug-test/current
+EnvironmentFile=/home/echooo/fed/ewll-bug-test/.env
+ExecStart=/home/echooo/fed/ewll-bug-test/current/.venv/bin/gunicorn -w 2 -b 127.0.0.1:5051 wsgi:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
