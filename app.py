@@ -23,6 +23,7 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
+from zoneinfo import ZoneInfo
 
 os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/mpl")
 os.environ.setdefault("XDG_CACHE_HOME", "/private/tmp")
@@ -36,6 +37,7 @@ from werkzeug.utils import secure_filename
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / "data" / "bug_platform.db"
 DEFAULT_UPLOAD_FOLDER = BASE_DIR / "uploads"
+APP_TIME_ZONE = ZoneInfo("Asia/Shanghai")
 PAGE_SIZE = 10
 BUG_PAGE_SIZE = 20
 CASE_PAGE_SIZE = 12
@@ -103,6 +105,10 @@ BUG_SEVERITY_FALLBACK_MAP = {
     "一般": "中",
     "建议": "建议",
 }
+
+
+def app_now() -> datetime:
+    return datetime.now(APP_TIME_ZONE)
 
 
 def bug_notify_key_for_platform(platform: object) -> str:
@@ -395,10 +401,13 @@ SAMPLE_BUGS = [
 
 def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__)
+    # Let Flask honor nginx subpath prefixes such as X-Forwarded-Prefix.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-me-before-deploy"),
         DATABASE=os.environ.get("DATABASE", str(DEFAULT_DB_PATH)),
         UPLOAD_FOLDER=os.environ.get("UPLOAD_FOLDER", str(DEFAULT_UPLOAD_FOLDER)),
+        START_SCHEDULER=os.environ.get("START_SCHEDULER", "1").strip().lower() not in {"0", "false", "no", "off"},
         PAGE_SIZE=PAGE_SIZE,
         BUG_PAGE_SIZE=BUG_PAGE_SIZE,
         CASE_PAGE_SIZE=CASE_PAGE_SIZE,
@@ -406,12 +415,14 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     if test_config:
         app.config.update(test_config)
+    if app.config.get("TESTING") and (not test_config or "START_SCHEDULER" not in test_config):
+        app.config["START_SCHEDULER"] = False
 
     Path(app.config["DATABASE"]).parent.mkdir(parents=True, exist_ok=True)
     Path(app.config["UPLOAD_FOLDER"]).mkdir(parents=True, exist_ok=True)
 
     def current_time() -> str:
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return app_now().strftime("%Y-%m-%d %H:%M:%S")
 
     def normalize_bug_severity_value(severity: object, priority: object = "") -> str:
         severity_text = str(severity or "").strip()
@@ -1349,7 +1360,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         sql = "UPDATE mail_settings SET last_result = ?"
         if mark_daily_sent:
             sql += ", last_sent_at = ?, last_sent_date = ?"
-            today_text = datetime.now().strftime("%Y-%m-%d")
+            today_text = app_now().strftime("%Y-%m-%d")
             params.extend([now_text, today_text])
         sql += " WHERE id = 1"
         get_db().execute(sql, params)
@@ -1362,7 +1373,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         sql = "UPDATE mail_settings SET report_notify_last_result = ?"
         if mark_daily_sent:
             sql += ", report_notify_last_sent_at = ?, report_notify_last_sent_date = ?"
-            today_text = datetime.now().strftime("%Y-%m-%d")
+            today_text = app_now().strftime("%Y-%m-%d")
             params.extend([now_text, today_text])
         sql += " WHERE id = 1"
         get_db().execute(sql, params)
@@ -2077,6 +2088,32 @@ def create_app(test_config: dict | None = None) -> Flask:
         last_sent_date = settings["last_sent_date"] or ""
         return now.strftime("%H:%M") == send_time and last_sent_date != now.strftime("%Y-%m-%d")
 
+    def claim_daily_mail_send(now: datetime) -> bool:
+        today_text = now.strftime("%Y-%m-%d")
+        cursor = get_db().execute(
+            """
+            UPDATE mail_settings
+            SET last_sent_date = ?, last_result = ?
+            WHERE id = 1 AND COALESCE(last_sent_date, '') != ?
+            """,
+            (today_text, f"定时发送中：{current_time()}", today_text),
+        )
+        get_db().commit()
+        return bool(cursor.rowcount)
+
+    def claim_daily_group_report_send(now: datetime) -> bool:
+        today_text = now.strftime("%Y-%m-%d")
+        cursor = get_db().execute(
+            """
+            UPDATE mail_settings
+            SET report_notify_last_sent_date = ?, report_notify_last_result = ?
+            WHERE id = 1 AND COALESCE(report_notify_last_sent_date, '') != ?
+            """,
+            (today_text, f"群测试报告定时发送中：{current_time()}", today_text),
+        )
+        get_db().commit()
+        return bool(cursor.rowcount)
+
     def start_mail_scheduler() -> None:
         if scheduler_started["value"]:
             return
@@ -2086,9 +2123,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             while True:
                 try:
                     with app.app_context():
-                        now = datetime.now()
+                        now = app_now()
                         mail_settings = fetch_mail_settings()
-                        if due_for_daily_mail(now, mail_settings):
+                        if due_for_daily_mail(now, mail_settings) and claim_daily_mail_send(now):
                             try:
                                 send_todo_summary_emails(force=False, mark_daily_sent=True, fail_when_empty=False)
                             except Exception as exc:
@@ -2098,7 +2135,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                                 )
                                 get_db().commit()
                         group_report_settings = fetch_group_report_settings()
-                        if due_for_daily_group_report(now, group_report_settings):
+                        if due_for_daily_group_report(now, group_report_settings) and claim_daily_group_report_send(now):
                             try:
                                 send_testing_report_to_group(force=False, mark_daily_sent=True)
                             except Exception as exc:
@@ -2329,7 +2366,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 continue
             source_field = normalize_attachment_source(source_fields[index] if index < len(source_fields) else "")
             original_name = secure_filename(file.filename) or f"attachment-{uuid.uuid4().hex}"
-            stored_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex}{Path(original_name).suffix}"
+            stored_name = f"{app_now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex}{Path(original_name).suffix}"
             destination = upload_dir / stored_name
             file.save(destination)
             db.execute(
@@ -5939,7 +5976,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         version = request.args.get("version", "").strip()
         report = fetch_report_data(version)
         html = render_template("report_export.html", report=report)
-        filename = f"testing-report-{datetime.now().strftime('%Y%m%d-%H%M')}.html"
+        filename = f"testing-report-{app_now().strftime('%Y%m%d-%H%M')}.html"
         return Response(html, mimetype="text/html; charset=utf-8", headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'})
 
     @app.route("/profile", methods=["GET", "POST"])
@@ -6260,15 +6297,14 @@ def create_app(test_config: dict | None = None) -> Flask:
         if repaired_case_count > 0:
             get_db().commit()
 
+    if app.config.get("START_SCHEDULER"):
+        start_mail_scheduler()
+
     return app
 
 
-app = create_app()
-# 让 Flask 正确识别 nginx 反向代理传入的子路径前缀。
-app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
-
-
 if __name__ == "__main__":
+    app = create_app()
     app.run(
         debug=False,
         use_reloader=False,

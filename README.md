@@ -61,8 +61,10 @@ cp .env.example .env
 set -a
 . ./.env
 set +a
-.venv/bin/gunicorn -w 2 -b 0.0.0.0:5050 wsgi:app
+.venv/bin/gunicorn -w 1 -b 0.0.0.0:5050 wsgi:app
 ```
+
+测试报告机器人依赖应用内定时线程，部署时建议在 `.env` 中保留 `START_SCHEDULER=1` 并使用 1 个 gunicorn worker；如果服务器暂时仍是旧的 2 worker 配置，代码会通过数据库日期锁避免同一份日报重复发送。
 
 更完整的服务器部署、systemd 后台运行和备份说明见 [DEPLOY.md](DEPLOY.md)。
 

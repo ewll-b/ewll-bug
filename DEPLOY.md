@@ -29,6 +29,7 @@ cp .env.example .env
 SECRET_KEY=替换成一串足够长的随机字符
 DATABASE=/opt/ewll-bug/data/bug_platform.db
 UPLOAD_FOLDER=/opt/ewll-bug/uploads
+START_SCHEDULER=1
 ```
 
 ## 4. 启动服务
@@ -37,8 +38,10 @@ UPLOAD_FOLDER=/opt/ewll-bug/uploads
 set -a
 . ./.env
 set +a
-.venv/bin/gunicorn -w 2 -b 0.0.0.0:5050 wsgi:app
+.venv/bin/gunicorn -w 1 -b 0.0.0.0:5050 wsgi:app
 ```
+
+> 测试报告机器人使用应用内定时线程触发。建议使用 1 个 gunicorn worker；如果服务器暂时仍是旧的 2 worker 配置，代码会通过数据库日期锁避免同一份日报重复发送。
 
 公司同一内网访问：
 
@@ -58,7 +61,7 @@ After=network.target
 [Service]
 WorkingDirectory=/opt/ewll-bug
 EnvironmentFile=/opt/ewll-bug/.env
-ExecStart=/opt/ewll-bug/.venv/bin/gunicorn -w 2 -b 0.0.0.0:5050 wsgi:app
+ExecStart=/opt/ewll-bug/.venv/bin/gunicorn -w 1 -b 0.0.0.0:5050 wsgi:app
 Restart=always
 RestartSec=5
 
