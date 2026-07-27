@@ -92,6 +92,12 @@ REPORT_PLATFORM_LABELS = {
     "iOS": "IOS",
 }
 BUG_PRIORITY_OPTIONS = BUG_SEVERITY_OPTIONS.copy()
+COMMENT_NOTIFICATION_CATEGORIES = ("bug_comment", "comment_mention")
+NOTIFICATION_CATEGORY_LABELS = {
+    "bug_comment": "评论",
+    "comment_mention": "@提及",
+    "severe_bug": "严重Bug",
+}
 BUG_PRIORITY_ICON_MAP = {
     "最高": "highest",
     "高": "high",
@@ -675,6 +681,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             user_id INTEGER NOT NULL,
             actor_id INTEGER,
             bug_id INTEGER,
+            comment_id INTEGER,
             category TEXT NOT NULL,
             title TEXT NOT NULL,
             body TEXT NOT NULL,
@@ -765,6 +772,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 user_id INTEGER NOT NULL,
                 actor_id INTEGER,
                 bug_id INTEGER,
+                comment_id INTEGER,
                 category TEXT NOT NULL,
                 title TEXT NOT NULL,
                 body TEXT NOT NULL,
@@ -878,6 +886,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             "bug_attachments": [
                 ("source_field", "ALTER TABLE bug_attachments ADD COLUMN source_field TEXT NOT NULL DEFAULT 'attachments'"),
             ],
+            "notifications": [
+                ("comment_id", "ALTER TABLE notifications ADD COLUMN comment_id INTEGER"),
+            ],
             "requirements": [
                 ("version", "ALTER TABLE requirements ADD COLUMN version TEXT"),
                 ("status", "ALTER TABLE requirements ADD COLUMN status TEXT"),
@@ -894,6 +905,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             for column_name, sql in column_sqls:
                 if column_name not in existing:
                     db.execute(sql)
+        if "comment_id" in column_names("notifications"):
+            db.execute("CREATE INDEX IF NOT EXISTS idx_notifications_comment ON notifications(comment_id)")
         mail_settings_count = db.execute("SELECT COUNT(*) AS count FROM mail_settings").fetchone()["count"]
         if not mail_settings_count:
             db.execute(
@@ -2034,6 +2047,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             deleted_histories = int(
                 db.execute(f"DELETE FROM bug_history WHERE bug_id IN ({placeholders})", bug_ids).rowcount or 0
             )
+            db.execute(f"DELETE FROM notifications WHERE bug_id IN ({placeholders})", bug_ids)
             db.execute(f"DELETE FROM bug_comments WHERE bug_id IN ({placeholders})", bug_ids)
             deleted_bugs = int(db.execute("DELETE FROM bugs WHERE project_id = ?", (project_id,)).rowcount or 0)
         if case_ids:
@@ -4043,6 +4057,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "verification_count": 0,
                 "closed_count": 0,
                 "my_todo_count": 0,
+                "notification_unread_count": 0,
             }
         version_sql = " AND COALESCE(version, '') = ?" if version else ""
         version_params = [version] if version else []
@@ -4075,12 +4090,14 @@ def create_app(test_config: dict | None = None) -> Flask:
                 """,
                 [target_project_id, target_user_id, *version_params] if version else (target_project_id, target_user_id),
             ).fetchone()["count"]
+        notification_unread_count = count_user_notifications(target_user_id, unread_only=True) if target_user_id is not None else 0
         return {
             "total": total,
             "active_count": active_count,
             "verification_count": verification_count,
             "closed_count": closed_count,
             "my_todo_count": my_todo_count,
+            "notification_unread_count": notification_unread_count,
         }
 
     def fetch_recent_report_bugs(project_id: int, version: str = "", limit: int = 5) -> list[sqlite3.Row]:
@@ -4246,21 +4263,23 @@ def create_app(test_config: dict | None = None) -> Flask:
         link_path: str = "",
         bug_id: int | None = None,
         actor_id: int | None = None,
+        comment_id: int | None = None,
     ) -> int:
         if not user_id:
             return 0
         cursor = get_db().execute(
             """
             INSERT INTO notifications (
-                user_id, actor_id, bug_id, category, title, body, link_path,
+                user_id, actor_id, bug_id, comment_id, category, title, body, link_path,
                 is_read, created_at, read_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL)
             """,
             (
                 int(user_id),
                 actor_id,
                 bug_id,
+                comment_id,
                 category,
                 title,
                 body,
@@ -4342,6 +4361,226 @@ def create_app(test_config: dict | None = None) -> Flask:
         )
         get_db().commit()
         return int(cursor.rowcount or 0)
+
+    def count_unread_bug_comment_notifications(user_id: int, bug_id: int) -> int:
+        placeholders = ",".join("?" for _ in COMMENT_NOTIFICATION_CATEGORIES)
+        return int(
+            get_db()
+            .execute(
+                f"""
+                SELECT COUNT(*) AS count
+                FROM notifications
+                WHERE user_id = ?
+                    AND bug_id = ?
+                    AND is_read = 0
+                    AND category IN ({placeholders})
+                """,
+                (user_id, bug_id, *COMMENT_NOTIFICATION_CATEGORIES),
+            )
+            .fetchone()["count"]
+        )
+
+    def mark_bug_comment_notifications_read(user_id: int, bug_id: int) -> int:
+        placeholders = ",".join("?" for _ in COMMENT_NOTIFICATION_CATEGORIES)
+        cursor = get_db().execute(
+            f"""
+            UPDATE notifications
+            SET is_read = 1, read_at = ?
+            WHERE user_id = ?
+                AND bug_id = ?
+                AND is_read = 0
+                AND category IN ({placeholders})
+            """,
+            (current_time(), user_id, bug_id, *COMMENT_NOTIFICATION_CATEGORIES),
+        )
+        get_db().commit()
+        return int(cursor.rowcount or 0)
+
+    def notification_category_label(category: object) -> str:
+        category_text = str(category or "").strip()
+        return NOTIFICATION_CATEGORY_LABELS.get(category_text, category_text or "消息")
+
+    def notification_snippet(content: str, max_length: int = 120) -> str:
+        text = re.sub(r"\s+", " ", str(content or "")).strip()
+        if len(text) <= max_length:
+            return text
+        return text[:max_length].rstrip() + "..."
+
+    def mention_tokens_for_users(users: list[sqlite3.Row]) -> list[dict[str, object]]:
+        tokens: list[dict[str, object]] = []
+        seen_pairs: set[tuple[int, str]] = set()
+        for user in users:
+            user_id = int(user["id"])
+            display_name = str(user["name"] or user["username"] or "").strip()
+            for token in {str(user["name"] or "").strip(), str(user["username"] or "").strip()}:
+                if not token or (user_id, token) in seen_pairs:
+                    continue
+                tokens.append(
+                    {
+                        "user_id": user_id,
+                        "token": token,
+                        "name": display_name or token,
+                    }
+                )
+                seen_pairs.add((user_id, token))
+        tokens.sort(key=lambda item: len(str(item["token"])), reverse=True)
+        return tokens
+
+    def find_comment_mentions(content: str, users: list[sqlite3.Row]) -> list[dict[str, object]]:
+        content_text = str(content or "")
+        tokens = mention_tokens_for_users(users)
+        mentions: list[dict[str, object]] = []
+        index = 0
+
+        def has_mention_boundary(end_index: int) -> bool:
+            if end_index >= len(content_text):
+                return True
+            next_char = content_text[end_index]
+            return next_char.isspace() or not (next_char.isalnum() or next_char == "_")
+
+        while index < len(content_text):
+            if content_text[index] != "@":
+                index += 1
+                continue
+            matched = None
+            for item in tokens:
+                token = str(item["token"])
+                mention_text = f"@{token}"
+                end_index = index + len(mention_text)
+                if content_text.startswith(mention_text, index) and has_mention_boundary(end_index):
+                    matched = {
+                        "start": index,
+                        "end": end_index,
+                        "user_id": int(item["user_id"]),
+                        "name": str(item["name"]),
+                        "text": mention_text,
+                    }
+                    break
+            if matched is None:
+                index += 1
+                continue
+            mentions.append(matched)
+            index = int(matched["end"])
+        return mentions
+
+    def extract_mentioned_user_ids(content: str, users: list[sqlite3.Row]) -> set[int]:
+        return {int(item["user_id"]) for item in find_comment_mentions(content, users)}
+
+    def fetch_comment_mention_states(bug_id: int) -> dict[int, dict[int, bool]]:
+        rows = get_db().execute(
+            """
+            SELECT comment_id, user_id, is_read
+            FROM notifications
+            WHERE bug_id = ?
+                AND category = 'comment_mention'
+                AND comment_id IS NOT NULL
+            ORDER BY id ASC
+            """,
+            (bug_id,),
+        ).fetchall()
+        states: dict[int, dict[int, bool]] = {}
+        for row in rows:
+            comment_id = int(row["comment_id"] or 0)
+            user_id = int(row["user_id"] or 0)
+            if not comment_id or not user_id:
+                continue
+            user_states = states.setdefault(comment_id, {})
+            user_states[user_id] = bool(row["is_read"])
+        return states
+
+    def build_comment_content_parts(
+        content: str,
+        users: list[sqlite3.Row],
+        mention_states: dict[int, bool],
+    ) -> list[dict[str, object]]:
+        content_text = str(content or "")
+        parts: list[dict[str, object]] = []
+        cursor = 0
+        for mention in find_comment_mentions(content_text, users):
+            start = int(mention["start"])
+            end = int(mention["end"])
+            if start > cursor:
+                parts.append({"type": "text", "text": content_text[cursor:start]})
+            user_id = int(mention["user_id"])
+            is_read = mention_states.get(user_id, True)
+            parts.append(
+                {
+                    "type": "mention",
+                    "text": str(mention["text"]),
+                    "user_id": user_id,
+                    "name": str(mention["name"]),
+                    "read_state": "read" if is_read else "unread",
+                }
+            )
+            cursor = end
+        if cursor < len(content_text):
+            parts.append({"type": "text", "text": content_text[cursor:]})
+        return parts or [{"type": "text", "text": ""}]
+
+    def notify_bug_comment_recipients(
+        bug: sqlite3.Row,
+        comment_id: int,
+        content: str,
+    ) -> int:
+        if g.get("current_user") is None:
+            return 0
+        actor_id = int(g.current_user["id"])
+        actor_name = str(g.current_user["name"] or "")
+        users = fetch_users()
+        mentioned_user_ids = extract_mentioned_user_ids(content, users)
+        recipient_categories: dict[int, str] = {}
+        for user_id in mentioned_user_ids:
+            if user_id != actor_id:
+                recipient_categories[user_id] = "comment_mention"
+
+        creator_id = int(bug["creator_id"] or 0)
+        if creator_id and creator_id != actor_id and creator_id not in recipient_categories:
+            recipient_categories[creator_id] = "bug_comment"
+
+        if not recipient_categories:
+            return 0
+
+        bug_no = format_bug_no(bug["bug_no"] or bug["id"])
+        link_path = url_for("bug_detail", bug_id=int(bug["id"]), tab="detail") + f"#comment-{comment_id}"
+        body = f"{bug_no}「{bug['title'] or '-'}」：{notification_snippet(content)}"
+        created_count = 0
+        for user_id, category in recipient_categories.items():
+            if category == "comment_mention":
+                title = f"{actor_name} 在评论中提到了你"
+            else:
+                title = f"{actor_name} 评论了你创建的 Bug"
+            create_notification(
+                user_id=user_id,
+                actor_id=actor_id,
+                bug_id=int(bug["id"]),
+                comment_id=comment_id,
+                category=category,
+                title=title,
+                body=body,
+                link_path=link_path,
+            )
+            created_count += 1
+        return created_count
+
+    def build_bug_mention_users(bug: sqlite3.Row, comments: list[sqlite3.Row]) -> list[sqlite3.Row]:
+        users = fetch_users()
+        users_by_id = {int(user["id"]): user for user in users}
+        ordered_ids: list[int] = []
+
+        def add_user_id(raw_user_id: object) -> None:
+            try:
+                user_id = int(raw_user_id or 0)
+            except (TypeError, ValueError):
+                return
+            if user_id and user_id in users_by_id and user_id not in ordered_ids:
+                ordered_ids.append(user_id)
+
+        add_user_id(bug["creator_id"])
+        add_user_id(bug["assignee_id"])
+        add_user_id(bug["previous_assignee_id"])
+        for comment in comments:
+            add_user_id(comment["user_id"])
+        return [users_by_id[user_id] for user_id in ordered_ids]
 
     def create_severe_bug_assignment_message(
         bug: sqlite3.Row | None,
@@ -4435,7 +4674,11 @@ def create_app(test_config: dict | None = None) -> Flask:
                 stack.append(child_id)
         return result
 
-    def build_bug_comment_threads(comments: list[sqlite3.Row]) -> list[dict[str, object]]:
+    def build_bug_comment_threads(
+        comments: list[sqlite3.Row],
+        mention_users: list[sqlite3.Row],
+        comment_mention_states: dict[int, dict[int, bool]],
+    ) -> list[dict[str, object]]:
         nodes: list[dict[str, object]] = []
         by_id: dict[int, dict[str, object]] = {}
         roots: list[dict[str, object]] = []
@@ -4450,6 +4693,11 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "actor_role": str(item["commenter_role"] or ""),
                 "created_at": str(item["created_at"] or ""),
                 "content": str(item["content"] or ""),
+                "content_parts": build_comment_content_parts(
+                    str(item["content"] or ""),
+                    mention_users,
+                    comment_mention_states.get(comment_id, {}),
+                ),
                 "reply_to_name": "",
                 "replies": [],
             }
@@ -4813,6 +5061,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             "bug_platform_options": BUG_PLATFORM_OPTIONS,
             "allowed_status_transitions": allowed_status_transitions,
             "can_edit_bug_platform": can_edit_bug_platform,
+            "notification_category_label": notification_category_label,
             "is_admin": is_admin(),
         }
 
@@ -4870,6 +5119,36 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.route("/todos")
     def my_todo_page() -> str:
         return render_template("my_todos.html", my_todos=fetch_my_todos(), summary=fetch_summary())
+
+    @app.route("/notifications")
+    def notification_center() -> str:
+        state = request.args.get("state", "").strip()
+        if state not in {"", "unread"}:
+            state = ""
+        user_id = int(g.current_user["id"])
+        return render_template(
+            "notifications.html",
+            notifications=fetch_user_notifications(user_id, state=state),
+            selected_state=state,
+            unread_count=count_user_notifications(user_id, unread_only=True),
+            total_count=count_user_notifications(user_id),
+        )
+
+    @app.route("/notifications/<int:notification_id>/open")
+    def open_notification(notification_id: int) -> Response:
+        user_id = int(g.current_user["id"])
+        notification = fetch_notification(notification_id, user_id)
+        if notification is None:
+            flash("消息不存在或已删除。", "error")
+            return redirect(url_for("notification_center"))
+        mark_notification_read(notification_id, user_id)
+        return redirect(local_redirect_target(notification["link_path"] or "", url_for("notification_center")))
+
+    @app.route("/notifications/read-all", methods=["POST"])
+    def mark_all_notifications_read_route() -> Response:
+        marked_count = mark_all_notifications_read(int(g.current_user["id"]))
+        flash(f"已将 {marked_count} 条消息标为已读。", "success")
+        return redirect(url_for("notification_center"))
 
     @app.route("/cases")
     def case_library() -> str:
@@ -5660,12 +5939,18 @@ def create_app(test_config: dict | None = None) -> Flask:
         comments = fetch_bug_comments(bug_id)
         attachments = fetch_bug_attachments(bug_id)
         attachments_by_field, general_attachments = group_bug_attachments(attachments)
+        unread_comment_count = count_unread_bug_comment_notifications(int(g.current_user["id"]), bug_id)
+        mention_users = fetch_users()
+        comment_mention_states = fetch_comment_mention_states(bug_id)
         return render_template(
             "bug_detail.html",
             bug=bug,
             history=history,
             comments=comments,
-            comment_threads=build_bug_comment_threads(comments),
+            comment_threads=build_bug_comment_threads(comments, mention_users, comment_mention_states),
+            mention_users=mention_users,
+            related_mention_users=build_bug_mention_users(bug, comments),
+            unread_comment_count=unread_comment_count,
             users=fetch_users(),
             requirements=fetch_requirements(),
             cases=fetch_cases_for_project(),
@@ -5676,13 +5961,25 @@ def create_app(test_config: dict | None = None) -> Flask:
             back_url=back_url,
         )
 
+    @app.route("/bugs/<int:bug_id>/comments/read", methods=["POST"])
+    def mark_bug_comments_read(bug_id: int) -> Response:
+        bug = fetch_bug(bug_id)
+        if bug is None:
+            return jsonify({"ok": False, "message": "未找到对应的 Bug。"}), 404
+        marked_count = mark_bug_comment_notifications_read(int(g.current_user["id"]), bug_id)
+        return jsonify(
+            {
+                "ok": True,
+                "marked_count": marked_count,
+                "unread_count": count_user_notifications(int(g.current_user["id"]), unread_only=True),
+            }
+        )
+
     @app.route("/bugs/<int:bug_id>/comments", methods=["POST"])
     def add_bug_comment(bug_id: int) -> Response:
         bug = fetch_bug(bug_id)
         default_target = url_for("bug_detail", bug_id=bug_id, tab="detail") + "#bug-comments"
-        redirect_target = request.form.get("redirect_to", "").strip()
-        if not redirect_target.startswith("/"):
-            redirect_target = default_target
+        redirect_target = local_redirect_target(request.form.get("redirect_to", ""), default_target)
         if bug is None:
             flash("未找到对应的 Bug。", "error")
             return redirect(url_for("bug_list"))
@@ -5701,7 +5998,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             if parent_comment is None:
                 parent_id = None
         now = current_time()
-        db.execute(
+        cursor = db.execute(
             """
             INSERT INTO bug_comments (bug_id, user_id, parent_id, author_name, content, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -5717,6 +6014,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             ),
         )
         db.commit()
+        notify_bug_comment_recipients(bug, int(cursor.lastrowid), content)
         flash("回复已发布。" if parent_id else "评论已发布。", "success")
         return redirect(redirect_target)
 
@@ -5736,6 +6034,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         comment_ids = collect_comment_branch_ids(bug_id, comment_id)
         placeholders = ",".join("?" for _ in comment_ids)
+        get_db().execute(f"DELETE FROM notifications WHERE comment_id IN ({placeholders})", comment_ids)
         get_db().execute(f"DELETE FROM bug_comments WHERE id IN ({placeholders})", comment_ids)
         get_db().commit()
         flash("评论及回复已删除。" if len(comment_ids) > 1 else "评论已删除。", "success")
@@ -5854,6 +6153,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         if not can_manage_bug(bug):
             flash("仅管理员或创建人可删除该 Bug。", "error")
             return redirect(url_for("bug_detail", bug_id=bug_id))
+        db.execute("DELETE FROM notifications WHERE bug_id = ?", (bug_id,))
         db.execute("DELETE FROM bug_attachments WHERE bug_id = ?", (bug_id,))
         db.execute("DELETE FROM bug_history WHERE bug_id = ?", (bug_id,))
         db.execute("DELETE FROM bug_comments WHERE bug_id = ?", (bug_id,))

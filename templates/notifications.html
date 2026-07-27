@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}消息中心 - alvinsclubBUG管理平台{% endblock %}
+
+{% block content %}
+<section class="panel notification-panel">
+    <div class="panel-head notification-head">
+        <div>
+            <h2>消息中心</h2>
+            <div class="head-stats">
+                <span>未读：{{ unread_count }}</span>
+                <span>全部：{{ total_count }}</span>
+            </div>
+        </div>
+        <form method="post" action="{{ url_for('mark_all_notifications_read_route') }}">
+            <button class="btn btn-secondary mini" type="submit" {% if unread_count <= 0 %}disabled{% endif %}>全部已读</button>
+        </form>
+    </div>
+
+    <div class="notification-tabs">
+        <a class="{% if not selected_state %}active{% endif %}" href="{{ url_for('notification_center') }}">全部</a>
+        <a class="{% if selected_state == 'unread' %}active{% endif %}" href="{{ url_for('notification_center', state='unread') }}">未读</a>
+    </div>
+
+    <div class="notification-list">
+        {% for item in notifications %}
+            <article class="notification-item {% if not item.is_read %}is-unread{% endif %}">
+                <div class="notification-dot-wrap">
+                    {% if not item.is_read %}
+                        <span class="notification-dot"></span>
+                    {% endif %}
+                </div>
+                <div class="notification-main">
+                    <div class="notification-title-row">
+                        <strong>{{ item.title }}</strong>
+                        <span>{{ notification_category_label(item.category) }}</span>
+                    </div>
+                    <p>{{ item.body }}</p>
+                    <div class="notification-meta">
+                        <span>{{ item.created_at }}</span>
+                        {% if item.actor_name %}
+                            <span>来自：{{ item.actor_name }}</span>
+                        {% endif %}
+                        {% if item.project_name %}
+                            <span>{{ item.project_name }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <a class="btn btn-primary mini" href="{{ url_for('open_notification', notification_id=item.id) }}">查看</a>
+            </article>
+        {% else %}
+            <div class="notification-empty">暂无消息</div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

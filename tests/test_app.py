@@ -1080,6 +1080,172 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertNotIn("待删除主评论".encode("utf-8"), response.data)
         self.assertNotIn("待删除回复".encode("utf-8"), response.data)
 
+    def test_bug_comment_mention_creates_unread_notification(self) -> None:
+        self.login_as("lit", "123456")
+        response = self.client.post(
+            "/bugs/1/comments",
+            data={
+                "content": "请 @周越 看一下这个问题",
+                "redirect_to": "/bugs/1?tab=detail#bug-comments",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            notification = conn.execute(
+                """
+                SELECT notifications.*, users.name AS recipient_name
+                FROM notifications
+                JOIN users ON notifications.user_id = users.id
+                WHERE users.username = ? AND notifications.category = ?
+                """,
+                ("zhouyue", "comment_mention"),
+            ).fetchone()
+
+        self.assertIsNotNone(notification)
+        self.assertEqual(notification["is_read"], 0)
+        self.assertIsNotNone(notification["comment_id"])
+        self.assertIn("提到了你", notification["title"])
+        self.assertIn("请 @周越 看一下这个问题", notification["body"])
+
+        self.login_as("zhouyue", "123456")
+        page = self.client.get("/notifications")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("消息中心".encode("utf-8"), page.data)
+        self.assertIn("@提及".encode("utf-8"), page.data)
+        self.assertIn("请 @周越 看一下这个问题".encode("utf-8"), page.data)
+
+    def test_bug_comment_mention_picker_includes_all_system_users(self) -> None:
+        self.login_as("lit", "123456")
+
+        response = self.client.get("/bugs/1?tab=detail")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("data-mention-picker".encode("utf-8"), response.data)
+        self.assertIn("data-mention-option".encode("utf-8"), response.data)
+        self.assertIn('data-mention-insert="Admin"'.encode("utf-8"), response.data)
+        self.assertIn("提示所有成员".encode("utf-8"), response.data)
+
+    def test_mentioned_name_chip_changes_after_recipient_reads(self) -> None:
+        self.login_as("lit", "123456")
+        self.client.post(
+            "/bugs/1/comments",
+            data={
+                "content": "请 @周越 帮忙确认",
+                "redirect_to": "/bugs/1?tab=detail#bug-comments",
+            },
+            follow_redirects=True,
+        )
+
+        unread_page = self.client.get("/bugs/1?tab=detail")
+        self.assertEqual(unread_page.status_code, 200)
+        self.assertIn("mention-chip is-unread".encode("utf-8"), unread_page.data)
+        self.assertIn('data-mention-read-state="unread"'.encode("utf-8"), unread_page.data)
+
+        self.login_as("zhouyue", "123456")
+        read_response = self.client.post("/bugs/1/comments/read")
+        self.assertEqual(read_response.status_code, 200)
+        self.assertEqual(read_response.json["ok"], True)
+
+        read_page = self.client.get("/bugs/1?tab=detail")
+        self.assertEqual(read_page.status_code, 200)
+        self.assertIn("mention-chip is-read".encode("utf-8"), read_page.data)
+        self.assertIn('data-mention-read-state="read"'.encode("utf-8"), read_page.data)
+
+    def test_comment_on_created_bug_notifies_creator(self) -> None:
+        self.login_as("zhouyue", "123456")
+        response = self.client.post(
+            "/bugs/1/comments",
+            data={
+                "content": "我补充一个处理进展",
+                "redirect_to": "/bugs/1?tab=detail#bug-comments",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            notification = conn.execute(
+                """
+                SELECT notifications.*, users.name AS recipient_name
+                FROM notifications
+                JOIN users ON notifications.user_id = users.id
+                WHERE users.username = ? AND notifications.category = ?
+                """,
+                ("lit", "bug_comment"),
+            ).fetchone()
+
+        self.assertIsNotNone(notification)
+        self.assertEqual(notification["is_read"], 0)
+        self.assertIn("评论了你创建的 Bug", notification["title"])
+        self.assertIn("我补充一个处理进展", notification["body"])
+
+    def test_comment_unread_dot_disappears_after_mark_read(self) -> None:
+        self.login_as("zhouyue", "123456")
+        self.client.post(
+            "/bugs/1/comments",
+            data={
+                "content": "这里有一条给创建人的未读评论",
+                "redirect_to": "/bugs/1?tab=detail#bug-comments",
+            },
+            follow_redirects=True,
+        )
+
+        self.login_as("lit", "123456")
+        detail = self.client.get("/bugs/1?tab=detail")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn('id="bug-comments" data-comment-unread-root'.encode("utf-8"), detail.data)
+
+        read_response = self.client.post("/bugs/1/comments/read")
+        self.assertEqual(read_response.status_code, 200)
+        self.assertEqual(read_response.json["ok"], True)
+        self.assertEqual(read_response.json["marked_count"], 1)
+        self.assertEqual(read_response.json["unread_count"], 0)
+
+        refreshed = self.client.get("/bugs/1?tab=detail")
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertNotIn('id="bug-comments" data-comment-unread-root'.encode("utf-8"), refreshed.data)
+
+    def test_open_notification_marks_it_read_and_redirects_to_comment(self) -> None:
+        self.login_as("zhouyue", "123456")
+        self.client.post(
+            "/bugs/1/comments",
+            data={
+                "content": "打开消息后应当变成已读",
+                "redirect_to": "/bugs/1?tab=detail#bug-comments",
+            },
+            follow_redirects=True,
+        )
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            notification = conn.execute(
+                """
+                SELECT notifications.*
+                FROM notifications
+                JOIN users ON notifications.user_id = users.id
+                WHERE users.username = ?
+                ORDER BY notifications.id DESC
+                LIMIT 1
+                """,
+                ("lit",),
+            ).fetchone()
+
+        self.assertIsNotNone(notification)
+        self.login_as("lit", "123456")
+        response = self.client.get(f"/notifications/{notification['id']}/open", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/bugs/1?tab=detail#comment-", response.headers["Location"])
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            updated = conn.execute("SELECT is_read FROM notifications WHERE id = ?", (notification["id"],)).fetchone()
+
+        self.assertEqual(updated["is_read"], 1)
+
     def test_resolve_flow_moves_bug_back_to_creator_todo(self) -> None:
         self.login_as("zhouyue", "123456")
         response = self.client.post(

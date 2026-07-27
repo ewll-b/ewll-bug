@@ -21,6 +21,46 @@
         {% endif %}
     </div>
 {%- endmacro %}
+{% macro mention_toolbar(mention_users) -%}
+    {% if mention_users %}
+        <div class="mention-toolbar">
+            <span>相关人</span>
+            {% for user in mention_users %}
+                {% set mention_name = user.name or user.username %}
+                {% if mention_name %}
+                    <button type="button" data-mention-insert="{{ mention_name }}">@{{ mention_name }}</button>
+                {% endif %}
+            {% endfor %}
+        </div>
+    {% endif %}
+{%- endmacro %}
+{% macro mention_editor(name, placeholder, mention_users) -%}
+    <div class="mention-editor" data-mention-editor>
+        <textarea name="{{ name }}" rows="3" placeholder="{{ placeholder }}" data-mention-textarea></textarea>
+        <div class="mention-picker" data-mention-picker hidden>
+            <div class="mention-picker-head">
+                <span class="mention-picker-icon">@</span>
+                <div>
+                    <strong>所有人</strong>
+                    <span>提示所有成员</span>
+                </div>
+            </div>
+            <div class="mention-picker-section">系统成员</div>
+            <div class="mention-picker-list">
+                {% for user in mention_users %}
+                    {% set mention_name = user.name or user.username %}
+                    <button type="button" data-mention-option data-mention-insert="{{ mention_name }}" data-mention-search="{{ mention_name }} {{ user.username or '' }} {{ user.role or '' }}">
+                        <span class="mention-picker-avatar">{{ mention_name[:1]|upper }}</span>
+                        <span class="mention-picker-person">
+                            <strong>{{ mention_name }}</strong>
+                            <span>{{ user.role or user.username or "" }}</span>
+                        </span>
+                    </button>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+{%- endmacro %}
 {% macro comment_item(item, bug_id, back_url, depth=0) -%}
     {% set actor_name = item.actor_name or "系统" %}
     <article class="bug-comment-card {% if depth > 0 %}is-reply{% endif %}" id="comment-{{ item.id }}" data-comment-item>
@@ -34,7 +74,19 @@
                     <time>{{ item.created_at }}</time>
                 </div>
             </div>
-            <p class="bug-comment-content">{% if item.reply_to_name %}回复 {{ item.reply_to_name }}：{% endif %}{{ item.content }}</p>
+            <p class="bug-comment-content">
+                {% if item.reply_to_name %}回复 {{ item.reply_to_name }}：{% endif %}
+                {% for part in item.content_parts %}
+                    {% if part.type == "mention" %}
+                        <span class="mention-chip is-{{ part.read_state }}" data-mention-chip data-mention-user-id="{{ part.user_id }}" data-mention-read-state="{{ part.read_state }}">
+                            {{ part.text }}
+                            <span class="mention-status-dot is-{{ part.read_state }}" aria-hidden="true"></span>
+                        </span>
+                    {% else %}
+                        {{ part.text }}
+                    {% endif %}
+                {% endfor %}
+            </p>
             <div class="bug-comment-actions">
                 <button class="comment-action-link" type="button" data-comment-reply-toggle>回复</button>
                 {% if current_user and (is_admin or item.user_id == current_user.id) %}
@@ -46,7 +98,8 @@
             <form class="bug-comment-reply-form" method="post" action="{{ url_for('add_bug_comment', bug_id=bug_id) }}" hidden data-comment-reply-box>
                 <input type="hidden" name="parent_id" value="{{ item.id }}">
                 <input type="hidden" name="redirect_to" value="{{ url_for('bug_detail', bug_id=bug_id, tab='detail', next=back_url) }}#comment-{{ item.id }}">
-                <textarea name="content" rows="3" placeholder="回复 {{ actor_name }}..."></textarea>
+                {{ mention_editor("content", "回复 " ~ actor_name ~ "...", mention_users) }}
+                {{ mention_toolbar(related_mention_users) }}
                 <div class="bug-comment-reply-actions">
                     <button class="btn btn-primary mini" type="submit">发布回复</button>
                     <button class="btn btn-secondary mini" type="button" data-comment-reply-cancel>取消</button>
@@ -95,7 +148,12 @@
     </div>
 
     <div class="detail-tabs detail-actions">
-        <a class="detail-tab {% if active_tab == 'detail' %}active{% endif %}" href="{{ url_for('bug_detail', bug_id=bug.id, tab='detail', next=back_url) }}">缺陷信息</a>
+        <a class="detail-tab {% if active_tab == 'detail' %}active{% endif %}" href="{{ url_for('bug_detail', bug_id=bug.id, tab='detail', next=back_url) }}">
+            <span>缺陷信息</span>
+            {% if unread_comment_count %}
+                <span class="comment-unread-dot" data-comment-unread-dot></span>
+            {% endif %}
+        </a>
         <a class="detail-tab {% if active_tab == 'process' %}active{% endif %}" href="{{ url_for('bug_detail', bug_id=bug.id, tab='process', next=back_url) }}">流转处理</a>
         <a class="detail-tab {% if active_tab == 'history' %}active{% endif %}" href="{{ url_for('bug_detail', bug_id=bug.id, tab='history', next=back_url) }}">缺陷历史</a>
     </div>
@@ -319,10 +377,15 @@
             </div></div>
         </div>
 
-        <section class="bug-comments-panel" id="bug-comments">
+        <section class="bug-comments-panel" id="bug-comments" {% if unread_comment_count %}data-comment-unread-root data-comment-read-url="{{ url_for('mark_bug_comments_read', bug_id=bug.id) }}"{% endif %}>
             <div class="bug-comments-head">
                 <div>
-                    <h3>评论</h3>
+                    <h3>
+                        <span>评论</span>
+                        {% if unread_comment_count %}
+                            <span class="comment-unread-dot" data-comment-unread-dot></span>
+                        {% endif %}
+                    </h3>
                     <p>记录评论内容、评论人和评论时间，支持对评论进行回复。</p>
                 </div>
             </div>
@@ -331,7 +394,8 @@
                 <div class="bug-comment-avatar is-current">{{ (current_user.name if current_user else '?')[:1]|upper }}</div>
                 <div class="bug-comment-editor-card">
                     <input type="hidden" name="redirect_to" value="{{ url_for('bug_detail', bug_id=bug.id, tab='detail', next=back_url) }}#bug-comments">
-                    <textarea name="content" rows="3" placeholder="添加评论..."></textarea>
+                    {{ mention_editor("content", "添加评论...", mention_users) }}
+                    {{ mention_toolbar(related_mention_users) }}
                     <div class="bug-comment-editor-actions">
                         <span class="bug-comment-hint">发布后会显示评论人、评论时间和评论内容。</span>
                         <button class="btn btn-primary mini" type="submit">发布评论</button>

@@ -13,6 +13,7 @@
     class="{% if request.endpoint == 'login' %}login-page-body{% endif %}"
     data-bug-sync-token="{{ bug_sync_token }}"
     data-history-refresh="{% if request.endpoint in ['bug_detail', 'bug_list', 'my_todo_page', 'testing_report'] %}1{% else %}0{% endif %}"
+    data-current-user-id="{{ current_user.id if current_user else '' }}"
 >
     {% if request.endpoint != 'login' %}
     <header class="app-header">
@@ -95,6 +96,12 @@
                                 <span>我的待办</span>
                                 {% if summary and summary.my_todo_count > 0 %}
                                     <span class="nav-badge">{{ summary.my_todo_count }}</span>
+                                {% endif %}
+                            </a>
+                            <a class="{% if request.endpoint == 'notification_center' %}active{% endif %}" href="{{ url_for('notification_center') }}">
+                                <span>消息中心</span>
+                                {% if summary and summary.notification_unread_count > 0 %}
+                                    <span class="nav-badge" data-notification-badge>{{ summary.notification_unread_count }}</span>
                                 {% endif %}
                             </a>
                             <a class="{% if request.endpoint == 'case_library' %}active{% endif %}" href="{{ url_for('case_library') }}">用例库</a>
@@ -357,6 +364,184 @@ document.addEventListener("DOMContentLoaded", function () {
                 dropdown.open = false;
             }
         });
+    });
+
+    function setNotificationBadge(count) {
+        const badge = document.querySelector("[data-notification-badge]");
+        if (!badge) {
+            return;
+        }
+        const nextCount = Math.max(0, Number(count) || 0);
+        if (nextCount > 0) {
+            badge.textContent = String(nextCount);
+            badge.hidden = false;
+        } else {
+            badge.hidden = true;
+            badge.textContent = "";
+        }
+    }
+
+    function activeMentionRange(textarea) {
+        if (!textarea || typeof textarea.selectionStart !== "number") {
+            return null;
+        }
+        const cursor = textarea.selectionStart;
+        const prefix = textarea.value.slice(0, cursor);
+        const atIndex = prefix.lastIndexOf("@");
+        if (atIndex < 0) {
+            return null;
+        }
+        const query = prefix.slice(atIndex + 1);
+        if (query.indexOf("@") >= 0 || /\s/.test(query)) {
+            return null;
+        }
+        return {
+            start: atIndex,
+            end: cursor,
+            query: query
+        };
+    }
+
+    function insertMention(textarea, name, range) {
+        if (!textarea || !name) {
+            return;
+        }
+        const mentionText = "@" + name + " ";
+        const start = range ? range.start : (typeof textarea.selectionStart === "number" ? textarea.selectionStart : textarea.value.length);
+        const end = range ? range.end : (typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : start);
+        const prefix = textarea.value.slice(0, start);
+        const suffix = textarea.value.slice(end);
+        const spacer = prefix && !/\s$/.test(prefix) ? " " : "";
+        textarea.value = prefix + spacer + mentionText + suffix;
+        const cursor = (prefix + spacer + mentionText).length;
+        textarea.focus();
+        if (typeof textarea.setSelectionRange === "function") {
+            textarea.setSelectionRange(cursor, cursor);
+        }
+    }
+
+    function hideMentionPicker(editor) {
+        const picker = editor ? editor.querySelector("[data-mention-picker]") : null;
+        if (picker) {
+            picker.hidden = true;
+        }
+        if (editor) {
+            editor._mentionRange = null;
+        }
+    }
+
+    function updateMentionPicker(editor) {
+        const textarea = editor.querySelector("[data-mention-textarea]");
+        const picker = editor.querySelector("[data-mention-picker]");
+        if (!textarea || !picker) {
+            return;
+        }
+        const range = activeMentionRange(textarea);
+        if (!range) {
+            hideMentionPicker(editor);
+            return;
+        }
+        const query = range.query.trim().toLowerCase();
+        let visibleCount = 0;
+        picker.querySelectorAll("[data-mention-option]").forEach(function (option) {
+            const searchText = (option.dataset.mentionSearch || option.textContent || "").toLowerCase();
+            const isVisible = !query || searchText.indexOf(query) >= 0;
+            option.hidden = !isVisible;
+            if (isVisible) {
+                visibleCount += 1;
+            }
+        });
+        editor._mentionRange = range;
+        picker.hidden = visibleCount === 0;
+    }
+
+    document.querySelectorAll("[data-mention-editor]").forEach(function (editor) {
+        const textarea = editor.querySelector("[data-mention-textarea]");
+        if (!textarea) {
+            return;
+        }
+        textarea.addEventListener("input", function () {
+            updateMentionPicker(editor);
+        });
+        textarea.addEventListener("keyup", function (event) {
+            if (event.key === "Escape") {
+                hideMentionPicker(editor);
+                return;
+            }
+            updateMentionPicker(editor);
+        });
+        textarea.addEventListener("click", function () {
+            updateMentionPicker(editor);
+        });
+        textarea.addEventListener("blur", function () {
+            window.setTimeout(function () {
+                hideMentionPicker(editor);
+            }, 180);
+        });
+        editor.querySelectorAll("[data-mention-option]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                insertMention(textarea, button.dataset.mentionInsert || "", editor._mentionRange);
+                hideMentionPicker(editor);
+            });
+        });
+    });
+
+    document.querySelectorAll(".mention-toolbar [data-mention-insert]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            const form = button.closest("form");
+            const textarea = form ? form.querySelector("[data-mention-textarea]") : null;
+            insertMention(textarea, button.dataset.mentionInsert || "");
+        });
+    });
+
+    document.addEventListener("click", function (event) {
+        const target = event.target instanceof Element ? event.target : null;
+        if (target && target.closest("[data-mention-editor]")) {
+            return;
+        }
+        document.querySelectorAll("[data-mention-editor]").forEach(hideMentionPicker);
+    });
+
+    document.querySelectorAll("[data-comment-unread-root]").forEach(function (root) {
+        const readUrl = root.dataset.commentReadUrl || "";
+        if (!readUrl) {
+            return;
+        }
+        window.setTimeout(function () {
+            fetch(readUrl, {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                }
+            })
+                .then(function (response) {
+                    return response.ok ? response.json() : null;
+                })
+                .then(function (payload) {
+                    if (!payload || !payload.ok) {
+                        return;
+                    }
+                    document.querySelectorAll("[data-comment-unread-dot]").forEach(function (dot) {
+                        dot.remove();
+                    });
+                    const currentUserId = document.body.dataset.currentUserId || "";
+                    if (currentUserId) {
+                        document.querySelectorAll('[data-mention-chip][data-mention-user-id="' + currentUserId + '"]').forEach(function (chip) {
+                            chip.dataset.mentionReadState = "read";
+                            chip.classList.remove("is-unread");
+                            chip.classList.add("is-read");
+                            const dot = chip.querySelector(".mention-status-dot");
+                            if (dot) {
+                                dot.classList.remove("is-unread");
+                                dot.classList.add("is-read");
+                            }
+                        });
+                    }
+                    setNotificationBadge(payload.unread_count);
+                })
+                .catch(function () {});
+        }, 800);
     });
 
     document.querySelectorAll("[data-comment-template]").forEach(function (button) {
