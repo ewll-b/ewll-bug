@@ -386,6 +386,105 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("在线文档".encode("utf-8"), response.data)
         self.assertIn("测试编号".encode("utf-8"), response.data)
+        self.assertIn("data-autosave-url".encode("utf-8"), response.data)
+        self.assertIn("已实时保存".encode("utf-8"), response.data)
+
+    def test_case_document_autosave_updates_single_field(self) -> None:
+        self.login_as("lit", "123456")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            before = conn.execute(
+                "SELECT case_no, expected_result FROM test_cases WHERE id = 1"
+            ).fetchone()
+
+        response = self.client.post(
+            "/cases/1/autosave",
+            data={
+                "case_id": "1",
+                "field": "steps",
+                "value": "实时保存步骤",
+            },
+            headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["ok"], True)
+        self.assertEqual(response.json["field"], "steps")
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT case_no, steps, expected_result FROM test_cases WHERE id = 1"
+            ).fetchone()
+
+        self.assertEqual(row["steps"], "实时保存步骤")
+        self.assertEqual(row["case_no"], before["case_no"])
+        self.assertEqual(row["expected_result"], before["expected_result"])
+
+    def test_case_document_autosave_updates_result_status(self) -> None:
+        self.login_as("lit", "123456")
+        response = self.client.post(
+            "/cases/1/autosave",
+            data={
+                "case_id": "1",
+                "field": "ios_result",
+                "value": "failed",
+            },
+            headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["ok"], True)
+        self.assertEqual(response.json["execute_status"], "失败")
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT ios_result, execute_status FROM test_cases WHERE id = 1").fetchone()
+
+        self.assertEqual(row["ios_result"], "failed")
+        self.assertEqual(row["execute_status"], "失败")
+
+    def test_case_document_autosave_persists_dynamic_cell(self) -> None:
+        self.login_as("lit", "123456")
+        self.client.post(
+            "/cases/1/update",
+            data={
+                "document_action": "add_column",
+                "new_column_name": "实时备注",
+            },
+            follow_redirects=True,
+        )
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            column = conn.execute(
+                """
+                SELECT id
+                FROM case_document_columns
+                WHERE project_id = 3 AND version = '2.6.0' AND folder_name = '测试用例' AND doc_name = '2.6.0-首页优化测试用例'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        response = self.client.post(
+            "/cases/1/autosave",
+            data={
+                "case_id": "1",
+                "field": f"dynamic_{column['id']}",
+                "value": "动态列实时保存",
+            },
+            headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["ok"], True)
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            cell = conn.execute(
+                "SELECT cell_value FROM case_document_cells WHERE column_id = ? AND case_id = ?",
+                (column["id"], 1),
+            ).fetchone()
+
+        self.assertIsNotNone(cell)
+        self.assertEqual(cell["cell_value"], "动态列实时保存")
 
     def test_case_document_update_syncs_status(self) -> None:
         self.login_as("lit", "123456")

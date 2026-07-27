@@ -6,7 +6,7 @@
 <div class="page-backbar">
     <a class="btn btn-secondary mini back-btn" href="{{ url_for('case_library', document_id=case_document.id) }}">返回用例库</a>
 </div>
-<form id="case-document-form" method="post" action="{{ url_for('update_case_document', document_id=case_document.id) }}">
+<form id="case-document-form" method="post" action="{{ url_for('update_case_document', document_id=case_document.id) }}" data-case-document-form data-autosave-url="{{ url_for('autosave_case_document', document_id=case_document.id) }}">
     <section class="panel document-shell">
         <div class="panel-head">
             <div>
@@ -24,7 +24,7 @@
                         <input type="text" name="new_column_name" value="" placeholder="输入列名后新增列">
                         <button class="btn btn-secondary mini" type="submit" name="document_action" value="add_column">新增列</button>
                     </div>
-                    <button class="btn btn-primary mini" type="submit" name="document_action" value="save">保存文档</button>
+                    <span class="document-autosave-status is-saved" data-case-autosave-status>已实时保存</span>
                 </div>
             {% endif %}
         </div>
@@ -277,6 +277,131 @@ document.addEventListener("DOMContentLoaded", function () {
             textarea.style.height = "auto";
             textarea.style.height = Math.max(textarea.scrollHeight, defaultRowHeight) + "px";
         });
+    });
+
+    const form = document.getElementById("case-document-form");
+    const autosaveUrl = form ? form.dataset.autosaveUrl : "";
+    const autosaveStatus = document.querySelector("[data-case-autosave-status]");
+    if (!form || !autosaveUrl) {
+        return;
+    }
+
+    function setAutosaveStatus(state, text) {
+        if (!autosaveStatus) {
+            return;
+        }
+        autosaveStatus.classList.remove("is-pending", "is-saving", "is-saved", "is-error");
+        autosaveStatus.classList.add(state);
+        autosaveStatus.textContent = text;
+    }
+
+    function fieldInfoForControl(control) {
+        const row = control.closest("tr[data-case-row]");
+        if (!row || !control.name) {
+            return null;
+        }
+        const caseId = row.dataset.caseRow || "";
+        const suffix = "_" + caseId;
+        if (!caseId || !control.name.endsWith(suffix)) {
+            return null;
+        }
+        return {
+            caseId: caseId,
+            field: control.name.slice(0, -suffix.length)
+        };
+    }
+
+    function markControlState(control, state) {
+        control.classList.remove("is-autosave-pending", "is-autosaving", "is-autosaved", "is-autosave-error");
+        if (state) {
+            control.classList.add(state);
+        }
+    }
+
+    async function saveControl(control) {
+        const info = fieldInfoForControl(control);
+        if (!info || control.disabled) {
+            return;
+        }
+        const currentValue = control.value || "";
+        const sequence = Number(control.dataset.autosaveSequence || "0") + 1;
+        control.dataset.autosaveSequence = String(sequence);
+        markControlState(control, "is-autosaving");
+        setAutosaveStatus("is-saving", "保存中...");
+
+        const payload = new FormData();
+        payload.append("case_id", info.caseId);
+        payload.append("field", info.field);
+        payload.append("value", currentValue);
+
+        try {
+            const response = await fetch(autosaveUrl, {
+                method: "POST",
+                body: payload,
+                headers: {
+                    "Accept": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                credentials: "same-origin"
+            });
+            const data = await response.json().catch(function () {
+                return { ok: false, message: "保存失败，请重试。" };
+            });
+            if (Number(control.dataset.autosaveSequence || "0") !== sequence) {
+                return;
+            }
+            if (!response.ok || !data.ok) {
+                throw new Error(data.message || "保存失败，请重试。");
+            }
+            control.dataset.savedValue = currentValue;
+            markControlState(control, "is-autosaved");
+            const savedTime = String(data.saved_at || "").slice(11, 19);
+            setAutosaveStatus("is-saved", savedTime ? "已保存 " + savedTime : "已实时保存");
+        } catch (error) {
+            if (Number(control.dataset.autosaveSequence || "0") !== sequence) {
+                return;
+            }
+            markControlState(control, "is-autosave-error");
+            setAutosaveStatus("is-error", error.message || "保存失败");
+        }
+    }
+
+    function scheduleAutosave(control, delay) {
+        if (!fieldInfoForControl(control) || control.disabled) {
+            return;
+        }
+        window.clearTimeout(control._caseAutosaveTimer);
+        if ((control.value || "") === (control.dataset.savedValue || "")) {
+            markControlState(control, "");
+            setAutosaveStatus("is-saved", "已实时保存");
+            return;
+        }
+        markControlState(control, "is-autosave-pending");
+        setAutosaveStatus("is-pending", "待保存");
+        control._caseAutosaveTimer = window.setTimeout(function () {
+            saveControl(control);
+        }, delay);
+    }
+
+    table.querySelectorAll("tbody tr[data-case-row] input[name], tbody tr[data-case-row] textarea[name], tbody tr[data-case-row] select[name]").forEach(function (control) {
+        if (!fieldInfoForControl(control)) {
+            return;
+        }
+        control.dataset.savedValue = control.value || "";
+        if (control.tagName === "SELECT") {
+            control.addEventListener("change", function () {
+                scheduleAutosave(control, 0);
+            });
+        } else {
+            control.addEventListener("input", function () {
+                scheduleAutosave(control, 650);
+            });
+            control.addEventListener("blur", function () {
+                if ((control.value || "") !== (control.dataset.savedValue || "")) {
+                    scheduleAutosave(control, 0);
+                }
+            });
+        }
     });
 });
 </script>

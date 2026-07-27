@@ -3665,6 +3665,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             for column in document_columns:
                 column_id = int(column["id"])
                 field_name = f"dynamic_{column_id}_{case_id}"
+                if field_name not in form:
+                    continue
                 cell_value = form.get(field_name, "").strip()
                 existing_value = existing_cell_map.get((case_id, column_id), "")
                 if cell_value == existing_value:
@@ -3692,6 +3694,121 @@ def create_app(test_config: dict | None = None) -> Flask:
                         "DELETE FROM case_document_cells WHERE column_id = ? AND case_id = ?",
                         (column_id, case_id),
                     )
+
+    def case_document_form_value(form, field_name: str, case_id: int, fallback: object) -> str:
+        input_name = f"{field_name}_{case_id}"
+        if input_name not in form:
+            return str(fallback or "")
+        return str(form.get(input_name, "") or "").strip()
+
+    def update_case_document_cell(
+        *,
+        bundle: dict,
+        case_id: int,
+        field_name: str,
+        raw_value: object,
+        db: sqlite3.Connection,
+        now: str,
+    ) -> dict[str, object]:
+        case_map = {int(item["id"]): item for item in bundle["cases"]}
+        case_item = case_map.get(case_id)
+        if case_item is None:
+            raise ValueError("未找到对应用例。")
+
+        field = str(field_name or "").strip()
+        value = str(raw_value or "").strip()
+        base_fields = {
+            "case_no",
+            "priority_level",
+            "module_name",
+            "steps",
+            "expected_result",
+            "ios_result",
+            "android_result",
+            "h5_result",
+            "remark",
+            "executor",
+        }
+        result_fields = {"ios_result", "android_result", "h5_result"}
+
+        if field in base_fields:
+            if field == "case_no" and not value:
+                raise ValueError("测试编号不能为空。")
+            if field in result_fields and value not in PLATFORM_RESULT_OPTIONS:
+                raise ValueError("请选择有效的执行结果。")
+
+            set_parts = [f"{field} = ?"]
+            params: list[object] = [value]
+            execute_status = str(case_item["execute_status"] or "")
+            if field in result_fields:
+                ios_result = value if field == "ios_result" else str(case_item["ios_result"] or "")
+                android_result = value if field == "android_result" else str(case_item["android_result"] or "")
+                h5_result = value if field == "h5_result" else str(case_item["h5_result"] or "")
+                execute_status = normalize_case_status(ios_result, android_result, h5_result)
+                set_parts.append("execute_status = ?")
+                params.append(execute_status)
+
+            set_parts.append("updated_at = ?")
+            params.extend([now, case_id])
+            db.execute(
+                f"UPDATE test_cases SET {', '.join(set_parts)} WHERE id = ?",
+                params,
+            )
+            return {
+                "field": field,
+                "case_id": case_id,
+                "value": value,
+                "execute_status": execute_status,
+                "saved_at": now,
+            }
+
+        dynamic_match = re.fullmatch(r"dynamic_(\d+)", field)
+        if dynamic_match:
+            column_id = int(dynamic_match.group(1))
+            valid_column_ids = {int(column["id"]) for column in bundle["columns"]}
+            if column_id not in valid_column_ids:
+                raise ValueError("未找到对应自定义列。")
+            existing = db.execute(
+                """
+                SELECT id
+                FROM case_document_cells
+                WHERE column_id = ? AND case_id = ?
+                """,
+                (column_id, case_id),
+            ).fetchone()
+            if value:
+                if existing is None:
+                    db.execute(
+                        """
+                        INSERT INTO case_document_cells (column_id, case_id, cell_value, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (column_id, case_id, value, now, now),
+                    )
+                else:
+                    db.execute(
+                        """
+                        UPDATE case_document_cells
+                        SET cell_value = ?, updated_at = ?
+                        WHERE column_id = ? AND case_id = ?
+                        """,
+                        (value, now, column_id, case_id),
+                    )
+            elif existing is not None:
+                db.execute(
+                    "DELETE FROM case_document_cells WHERE column_id = ? AND case_id = ?",
+                    (column_id, case_id),
+                )
+            db.execute("UPDATE test_cases SET updated_at = ? WHERE id = ?", (now, case_id))
+            return {
+                "field": field,
+                "case_id": case_id,
+                "value": value,
+                "execute_status": str(case_item["execute_status"] or ""),
+                "saved_at": now,
+            }
+
+        raise ValueError("该字段不支持实时保存。")
 
     def build_case_tree(documents: list[sqlite3.Row]) -> list[dict]:
         grouped: dict[str, list[sqlite3.Row]] = {}
@@ -5221,16 +5338,16 @@ def create_app(test_config: dict | None = None) -> Flask:
         document_action = request.form.get("document_action", "save").strip() or "save"
         for item in bundle["cases"]:
             case_id = item["id"]
-            case_no = request.form.get(f"case_no_{case_id}", "").strip() or str(item["case_no"] or "")
-            priority_level = request.form.get(f"priority_level_{case_id}", "").strip() or str(item["priority_level"] or "")
-            module_name = request.form.get(f"module_name_{case_id}", "").strip()
-            steps = request.form.get(f"steps_{case_id}", "").strip()
-            expected_result = request.form.get(f"expected_result_{case_id}", "").strip()
-            ios_result = request.form.get(f"ios_result_{case_id}", "").strip()
-            android_result = request.form.get(f"android_result_{case_id}", "").strip()
-            h5_result = request.form.get(f"h5_result_{case_id}", "").strip()
-            remark = request.form.get(f"remark_{case_id}", "").strip()
-            executor = request.form.get(f"executor_{case_id}", "").strip()
+            case_no = case_document_form_value(request.form, "case_no", case_id, item["case_no"]) or str(item["case_no"] or "")
+            priority_level = case_document_form_value(request.form, "priority_level", case_id, item["priority_level"])
+            module_name = case_document_form_value(request.form, "module_name", case_id, item["module_name"])
+            steps = case_document_form_value(request.form, "steps", case_id, item["steps"])
+            expected_result = case_document_form_value(request.form, "expected_result", case_id, item["expected_result"])
+            ios_result = case_document_form_value(request.form, "ios_result", case_id, item["ios_result"])
+            android_result = case_document_form_value(request.form, "android_result", case_id, item["android_result"])
+            h5_result = case_document_form_value(request.form, "h5_result", case_id, item["h5_result"])
+            remark = case_document_form_value(request.form, "remark", case_id, item["remark"])
+            executor = case_document_form_value(request.form, "executor", case_id, item["executor"])
             execute_status = normalize_case_status(ios_result, android_result, h5_result)
             db.execute(
                 """
@@ -5283,6 +5400,39 @@ def create_app(test_config: dict | None = None) -> Flask:
         db.commit()
         flash(message, category)
         return redirect(url_for("case_document_detail", document_id=document_id))
+
+    @app.route("/cases/<int:document_id>/autosave", methods=["POST"])
+    def autosave_case_document(document_id: int) -> Response:
+        bundle = fetch_case_document_bundle(document_id)
+        if bundle is None:
+            return jsonify({"ok": False, "message": "未找到对应的在线文档。"}), 404
+        if not can_edit_case_execution(bundle["document"]):
+            return jsonify({"ok": False, "message": "仅登录用户可编辑在线文档。"}), 403
+        try:
+            case_id = int(request.form.get("case_id", "0") or 0)
+        except ValueError:
+            case_id = 0
+        field_name = request.form.get("field", "").strip()
+        raw_value = request.form.get("value", "")
+        if not case_id or not field_name:
+            return jsonify({"ok": False, "message": "保存参数不完整。"}), 400
+
+        db = get_db()
+        try:
+            payload = update_case_document_cell(
+                bundle=bundle,
+                case_id=case_id,
+                field_name=field_name,
+                raw_value=raw_value,
+                db=db,
+                now=current_time(),
+            )
+        except ValueError as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+        db.commit()
+        payload["ok"] = True
+        payload["message"] = "已实时保存。"
+        return jsonify(payload)
 
     @app.route("/cases/<int:document_id>/items/<int:case_id>/delete", methods=["POST"])
     def delete_case_item_route(document_id: int, case_id: int) -> Response:

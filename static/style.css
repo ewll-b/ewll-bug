@@ -3434,6 +3434,30 @@ body.is-resizing-panels {
     font-size: 13px;
 }
 
+.document-autosave-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 8px;
+    color: #6c7a8d;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.document-autosave-status.is-pending,
+.document-autosave-status.is-saving {
+    color: #8a6d22;
+}
+
+.document-autosave-status.is-saved {
+    color: #1f8a5f;
+}
+
+.document-autosave-status.is-error {
+    color: #c63d44;
+}
+
 .document-meta-card {
     display: grid;
     gap: 6px;
@@ -3643,6 +3667,20 @@ body.is-resizing-panels {
 .online-sheet .sheet-remark:focus {
     background: #ffffff;
     box-shadow: inset 0 0 0 1px rgba(64, 96, 128, 0.22);
+}
+
+.online-sheet .sheet-inline-input.is-autosaving,
+.online-sheet .sheet-inline-textarea.is-autosaving,
+.online-sheet .sheet-remark.is-autosaving,
+.online-sheet .sheet-result-select.is-autosaving {
+    box-shadow: inset 0 -2px 0 rgba(138, 109, 34, 0.42);
+}
+
+.online-sheet .sheet-inline-input.is-autosave-error,
+.online-sheet .sheet-inline-textarea.is-autosave-error,
+.online-sheet .sheet-remark.is-autosave-error,
+.online-sheet .sheet-result-select.is-autosave-error {
+    box-shadow: inset 0 0 0 1px rgba(198, 61, 68, 0.6);
 }
 
 .sheet-static-block {
