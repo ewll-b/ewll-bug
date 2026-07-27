@@ -74,8 +74,7 @@
                     <time>{{ item.created_at }}</time>
                 </div>
             </div>
-            <p class="bug-comment-content">
-                {% if item.reply_to_name %}回复 {{ item.reply_to_name }}：{% endif %}
+            <p class="bug-comment-content">{%- if item.reply_to_name -%}回复 {{ item.reply_to_name }}：{%- endif -%}
                 {%- for part in item.content_parts -%}
                     {%- if part.type == "mention" -%}
                         <span class="mention-text is-{{ part.read_state }}" data-mention-text data-mention-user-id="{{ part.user_id }}" data-mention-read-state="{{ part.read_state }}">{{ part.text }}</span>

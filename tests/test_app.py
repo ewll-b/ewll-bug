@@ -1133,7 +1133,7 @@ class BugPlatformTestCase(unittest.TestCase):
         self.client.post(
             "/bugs/1/comments",
             data={
-                "content": "请 @周越 帮忙确认",
+                "content": "@周越 帮忙确认",
                 "redirect_to": "/bugs/1?tab=detail#bug-comments",
             },
             follow_redirects=True,
@@ -1141,6 +1141,7 @@ class BugPlatformTestCase(unittest.TestCase):
 
         unread_page = self.client.get("/bugs/1?tab=detail")
         self.assertEqual(unread_page.status_code, 200)
+        self.assertIn('<p class="bug-comment-content"><span class="mention-text'.encode("utf-8"), unread_page.data)
         self.assertIn("mention-text is-unread".encode("utf-8"), unread_page.data)
         self.assertIn('data-mention-read-state="unread"'.encode("utf-8"), unread_page.data)
         self.assertNotIn("mention-status-dot".encode("utf-8"), unread_page.data)
