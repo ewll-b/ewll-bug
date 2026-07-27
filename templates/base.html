@@ -527,15 +527,10 @@ document.addEventListener("DOMContentLoaded", function () {
                     });
                     const currentUserId = document.body.dataset.currentUserId || "";
                     if (currentUserId) {
-                        document.querySelectorAll('[data-mention-chip][data-mention-user-id="' + currentUserId + '"]').forEach(function (chip) {
-                            chip.dataset.mentionReadState = "read";
-                            chip.classList.remove("is-unread");
-                            chip.classList.add("is-read");
-                            const dot = chip.querySelector(".mention-status-dot");
-                            if (dot) {
-                                dot.classList.remove("is-unread");
-                                dot.classList.add("is-read");
-                            }
+                        document.querySelectorAll('[data-mention-text][data-mention-user-id="' + currentUserId + '"]').forEach(function (mention) {
+                            mention.dataset.mentionReadState = "read";
+                            mention.classList.remove("is-unread");
+                            mention.classList.add("is-read");
                         });
                     }
                     setNotificationBadge(payload.unread_count);

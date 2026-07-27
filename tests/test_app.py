@@ -1128,7 +1128,7 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertIn('data-mention-insert="Admin"'.encode("utf-8"), response.data)
         self.assertIn("提示所有成员".encode("utf-8"), response.data)
 
-    def test_mentioned_name_chip_changes_after_recipient_reads(self) -> None:
+    def test_mentioned_name_text_changes_after_recipient_reads(self) -> None:
         self.login_as("lit", "123456")
         self.client.post(
             "/bugs/1/comments",
@@ -1141,8 +1141,9 @@ class BugPlatformTestCase(unittest.TestCase):
 
         unread_page = self.client.get("/bugs/1?tab=detail")
         self.assertEqual(unread_page.status_code, 200)
-        self.assertIn("mention-chip is-unread".encode("utf-8"), unread_page.data)
+        self.assertIn("mention-text is-unread".encode("utf-8"), unread_page.data)
         self.assertIn('data-mention-read-state="unread"'.encode("utf-8"), unread_page.data)
+        self.assertNotIn("mention-status-dot".encode("utf-8"), unread_page.data)
 
         self.login_as("zhouyue", "123456")
         read_response = self.client.post("/bugs/1/comments/read")
@@ -1151,8 +1152,9 @@ class BugPlatformTestCase(unittest.TestCase):
 
         read_page = self.client.get("/bugs/1?tab=detail")
         self.assertEqual(read_page.status_code, 200)
-        self.assertIn("mention-chip is-read".encode("utf-8"), read_page.data)
+        self.assertIn("mention-text is-read".encode("utf-8"), read_page.data)
         self.assertIn('data-mention-read-state="read"'.encode("utf-8"), read_page.data)
+        self.assertNotIn("mention-status-dot".encode("utf-8"), read_page.data)
 
     def test_comment_on_created_bug_notifies_creator(self) -> None:
         self.login_as("zhouyue", "123456")

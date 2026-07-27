@@ -2316,41 +2316,9 @@ a {
     background: #eef5ff;
 }
 
-.mention-chip {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    min-height: 26px;
-    margin: 0 2px;
-    padding: 0 10px;
-    border-radius: 7px;
-    background: #d9eaff;
+.mention-text {
     color: #1262c4;
-    font-weight: 800;
-    line-height: 26px;
-    white-space: nowrap;
-}
-
-.mention-status-dot {
-    position: absolute;
-    top: -3px;
-    right: -3px;
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    border: 1px solid #9fb1c4;
-    background: #ffffff;
-    box-shadow: 0 0 0 2px #ffffff;
-}
-
-.mention-status-dot.is-read {
-    border-color: #16b894;
-    background: #16b894;
-}
-
-.mention-status-dot.is-unread {
-    border-color: #9fb1c4;
-    background: #ffffff;
+    font-weight: 700;
 }
 
 .comment-unread-dot,
