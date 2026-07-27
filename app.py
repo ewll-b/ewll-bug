@@ -54,7 +54,7 @@ STATUS_LABELS = dict(STATUS_OPTIONS)
 TODO_STATUS_CODES = ("open", "in_progress", "pending_verification")
 BUG_SEVERITY_OPTIONS = ["最高", "高", "中", "低", "最低", "建议"]
 MAIL_NOTIFY_SEVERITY = "最高"
-BUG_PLATFORM_OPTIONS = ["Android", "iOS", "双端", "H5", "后端", "AI"]
+BUG_PLATFORM_OPTIONS = ["Android", "iOS", "双端", "H5", "WEB", "后端", "AI"]
 BUG_NOTIFY_RULE_OPTIONS = [
     {"key": "APP", "label": "APP（Android / iOS / 双端）"},
     {"key": "H5", "label": "H5"},
@@ -1051,7 +1051,8 @@ def create_app(test_config: dict | None = None) -> Flask:
                     WHEN module = 'AI' THEN 'AI'
                     WHEN module = 'Backend' THEN '后端'
                     WHEN module = 'H5' THEN 'H5'
-                    WHEN module IN ('APP', 'WEB') THEN '双端'
+                    WHEN module = 'APP' THEN '双端'
+                    WHEN module = 'WEB' THEN 'WEB'
                     ELSE COALESCE(platform, '')
                 END
                 WHERE COALESCE(platform, '') = ''
@@ -2152,6 +2153,21 @@ def create_app(test_config: dict | None = None) -> Flask:
         if next_url.startswith("/"):
             return next_url
         return url_for("admin_center")
+
+    def local_redirect_target(raw_target: str, default_url: str) -> str:
+        target = str(raw_target or "").strip()
+        if not target:
+            return default_url
+        parsed = urllib_parse.urlparse(target)
+        if parsed.netloc or parsed.scheme:
+            if parsed.netloc != request.host:
+                return default_url
+            target = parsed.path or default_url
+            if parsed.query:
+                target = f"{target}?{parsed.query}"
+            if parsed.fragment:
+                target = f"{target}#{parsed.fragment}"
+        return target if target.startswith("/") else default_url
 
     def local_back_url(default_url: str) -> str:
         next_url = request.values.get("next", "").strip()
@@ -5870,7 +5886,10 @@ def create_app(test_config: dict | None = None) -> Flask:
             flash("未找到对应的 Bug。", "error")
             return redirect(url_for("bug_list"))
         action = request.form.get("action", "").strip()
-        redirect_target = request.form.get("redirect_to", "").strip() or url_for("bug_detail", bug_id=bug_id)
+        redirect_target = local_redirect_target(
+            request.form.get("redirect_to", ""),
+            url_for("bug_detail", bug_id=bug_id),
+        )
         if action == "change_platform":
             if not can_edit_bug_platform(bug):
                 flash("仅当前处理人、提Bug人或管理员可修改端。", "error")
@@ -5957,6 +5976,8 @@ def create_app(test_config: dict | None = None) -> Flask:
                 f"严重Bug通知已发送，{notify_message}" if notify_sent else f"严重Bug通知未发送：{notify_message}",
                 "success" if notify_sent else "error",
             )
+        if new_status == "closed":
+            return redirect(url_for("bug_list"))
         return redirect(redirect_target)
 
     @app.route("/reports/testing")

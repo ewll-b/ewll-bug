@@ -215,6 +215,14 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(new_response.status_code, 200)
         self.assertIn('<input type="text" name="version" value="2.8.0"'.encode("utf-8"), new_response.data)
 
+    def test_bug_create_form_includes_web_platform(self) -> None:
+        self.login_as("lit", "123456")
+
+        response = self.client.get("/bugs/new")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-filter-value="WEB"'.encode("utf-8"), response.data)
+
     def test_bug_detail_edit_persists_changes_and_bumps_sync_token(self) -> None:
         self.login_as("admin", "admin123")
         with self.client.session_transaction() as session_state:
@@ -1082,6 +1090,70 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("待验证".encode("utf-8"), response.data)
         self.assertIn("李婷".encode("utf-8"), response.data)
+
+    def test_change_status_redirects_back_to_current_page(self) -> None:
+        self.login_as("zhouyue", "123456")
+
+        response = self.client.post(
+            "/bugs/1/update",
+            data={
+                "action": "change_status",
+                "status": "in_progress",
+                "redirect_to": "/bugs/1?tab=process",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/bugs/1?tab=process")
+
+    def test_change_status_to_closed_redirects_to_bug_list(self) -> None:
+        self.login_as("lit", "123456")
+
+        response = self.client.post(
+            "/bugs/1/update",
+            data={
+                "action": "change_status",
+                "status": "closed",
+                "redirect_to": "/bugs/1?tab=detail",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/bugs")
+
+    def test_close_action_redirects_to_bug_list(self) -> None:
+        self.login_as("lit", "123456")
+
+        response = self.client.post(
+            "/bugs/1/update",
+            data={
+                "action": "close",
+                "resolution_note": "验证通过",
+                "redirect_to": "/bugs/1?tab=process",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/bugs")
+
+    def test_bug_update_ignores_external_redirect_target(self) -> None:
+        self.login_as("zhouyue", "123456")
+
+        response = self.client.post(
+            "/bugs/1/update",
+            data={
+                "action": "change_status",
+                "status": "in_progress",
+                "redirect_to": "https://example.com/elsewhere",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/bugs/1")
 
     def test_editing_pending_verification_bug_keeps_return_handler_for_reject(self) -> None:
         self.login_as("zhouyue", "123456")
