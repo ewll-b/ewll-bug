@@ -47,36 +47,27 @@
             <form class="case-manage-form" method="post" action="{{ url_for('manage_case_library') }}">
                 <input type="hidden" name="action" value="create_folder">
                 <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+                <input type="hidden" name="open_folder" value="{{ selected_folder or '' }}">
                 <input type="text" name="folder_name" placeholder="新建文件夹名称">
                 <button class="btn btn-secondary mini" type="submit">新建文件夹</button>
             </form>
             <div class="case-folder-tree">
                 {% for folder in case_tree %}
-                    <div class="case-folder-group">
-                        <div class="case-folder-name">{{ folder.name }}</div>
-                        <form class="case-manage-form inline-manage-form" method="post" action="{{ url_for('manage_case_library') }}">
-                            <input type="hidden" name="action" value="create_document">
+                    <div class="case-folder-group {% if selected_folder == folder.name %}open{% endif %}" data-folder-drop-zone data-folder-name="{{ folder.name }}">
+                        <a class="case-folder-card {% if selected_folder == folder.name %}active{% endif %}" href="{{ url_for('case_library', folder=folder.name, version=selected_version) if selected_version else url_for('case_library', folder=folder.name) }}">
+                            <span class="case-folder-icon" aria-hidden="true">夹</span>
+                            <span class="case-folder-info">
+                                <span class="case-folder-name">{{ folder.name }}</span>
+                                <small>{{ folder.documents|length }} 个文档</small>
+                            </span>
+                        </a>
+                        <form class="case-move-form" method="post" action="{{ url_for('manage_case_library') }}" data-folder-move-form hidden>
+                            <input type="hidden" name="action" value="move_document">
                             <input type="hidden" name="folder_name" value="{{ folder.name }}">
                             <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
-                            <input type="text" name="doc_name" placeholder="新建在线文档">
-                            <button class="btn btn-secondary mini" type="submit">新增文档</button>
+                            <input type="hidden" name="open_folder" value="{{ selected_folder or '' }}">
+                            <input type="hidden" name="document_id" value="" data-move-document-id>
                         </form>
-                        {% for item in folder.documents %}
-                            <div class="case-folder-item">
-                                <a class="case-folder-link {% if selected_document and selected_document.id == item.id %}active{% endif %}" href="{{ url_for('case_library', document_id=item.id, version=selected_version) if selected_version else url_for('case_library', document_id=item.id) }}">
-                                    <span>{{ item.doc_name }}</span>
-                                    <small class="case-doc-version">{{ item.version or "未设版本" }}</small>
-                                </a>
-                                {% if current_user and (is_admin or item.creator_id == current_user.id) %}
-                                    <form method="post" action="{{ url_for('manage_case_library') }}" class="case-delete-form" data-confirm-form data-confirm-title="确认删除在线文档" data-confirm-message="删除后该在线文档及其用例数据将被移除，确定继续吗？">
-                                        <input type="hidden" name="action" value="delete_document">
-                                        <input type="hidden" name="document_id" value="{{ item.id }}">
-                                        <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
-                                        <button class="case-delete-btn" type="submit">删除</button>
-                                    </form>
-                                {% endif %}
-                            </div>
-                        {% endfor %}
                     </div>
                 {% else %}
                     <div class="empty-row">暂无在线文档</div>
@@ -88,23 +79,47 @@
 
         <div class="case-file-panel">
             <div class="case-file-toolbar">
-                <div class="case-file-toolbar-title">在线文档列表</div>
+                <div>
+                    <div class="case-file-toolbar-title">{{ selected_folder or "在线文档列表" }}</div>
+                    <small class="case-current-folder-meta">当前文件夹：{{ selected_folder or "全部文档" }}</small>
+                </div>
+                {% if selected_folder %}
+                    <form class="case-manage-form inline-manage-form case-file-create-form" method="post" action="{{ url_for('manage_case_library') }}">
+                        <input type="hidden" name="action" value="create_document">
+                        <input type="hidden" name="folder_name" value="{{ selected_folder }}">
+                        <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+                        <input type="hidden" name="open_folder" value="{{ selected_folder or '' }}">
+                        <input type="text" name="doc_name" placeholder="新建在线文档">
+                        <button class="btn btn-secondary mini" type="submit">新增文档</button>
+                    </form>
+                {% endif %}
                 <div class="case-file-toolbar-time">修改时间</div>
             </div>
             <div class="case-file-list">
-                {% for item in case_documents %}
-                    <a class="case-file-row {% if selected_document and selected_document.id == item.id %}active{% endif %}" href="{{ url_for('case_library', document_id=item.id, version=selected_version) if selected_version else url_for('case_library', document_id=item.id) }}">
-                        <div class="case-file-meta">
-                            <span class="case-file-icon">表</span>
-                            <span class="case-file-text">
-                                <span class="case-file-name">{{ item.doc_name }}</span>
-                                <small class="case-doc-version">{{ item.version or "未设版本" }}</small>
-                            </span>
-                        </div>
+                {% for item in visible_case_documents %}
+                    <div class="case-file-row {% if selected_document and selected_document.id == item.id %}active{% endif %}" draggable="true" data-document-drag data-document-id="{{ item.id }}" data-document-folder="{{ item.folder_name or '测试用例' }}">
+                        <a class="case-file-main" href="{{ url_for('case_library', document_id=item.id, folder=selected_folder, version=selected_version) if selected_version else url_for('case_library', document_id=item.id, folder=selected_folder) }}">
+                            <div class="case-file-meta">
+                                <span class="case-file-icon">表</span>
+                                <span class="case-file-text">
+                                    <span class="case-file-name">{{ item.doc_name }}</span>
+                                    <small class="case-doc-version">{{ item.version or "未设版本" }}</small>
+                                </span>
+                            </div>
+                        </a>
                         <span class="case-file-time">{{ item.updated_at[5:16] if item.updated_at else '' }}</span>
-                    </a>
+                        {% if current_user and (is_admin or item.creator_id == current_user.id) %}
+                            <form method="post" action="{{ url_for('manage_case_library') }}" class="case-delete-form" data-confirm-form data-confirm-title="确认删除在线文档" data-confirm-message="删除后该在线文档及其用例数据将被移除，确定继续吗？">
+                                <input type="hidden" name="action" value="delete_document">
+                                <input type="hidden" name="document_id" value="{{ item.id }}">
+                                <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+                                <input type="hidden" name="open_folder" value="{{ selected_folder or '' }}">
+                                <button class="case-delete-btn" type="submit">删除</button>
+                            </form>
+                        {% endif %}
+                    </div>
                 {% else %}
-                    <div class="empty-row">暂无在线文档</div>
+                    <div class="empty-row">当前文件夹暂无在线文档</div>
                 {% endfor %}
             </div>
         </div>
@@ -232,6 +247,75 @@ document.addEventListener("DOMContentLoaded", function () {
     workspace.querySelectorAll("[data-resize-handle]").forEach(function (handle) {
         handle.addEventListener("pointerdown", function (event) {
             startResize(event, handle.dataset.resizeHandle);
+        });
+    });
+
+    let draggedDocumentId = "";
+    let draggedDocumentFolder = "";
+    let draggedRow = null;
+
+    function clearDropState() {
+        workspace.classList.remove("is-document-dragging");
+        workspace.querySelectorAll(".is-drop-target").forEach(function (target) {
+            target.classList.remove("is-drop-target");
+        });
+        if (draggedRow) {
+            draggedRow.classList.remove("is-dragging");
+        }
+        draggedDocumentId = "";
+        draggedDocumentFolder = "";
+        draggedRow = null;
+    }
+
+    workspace.querySelectorAll("[data-document-drag]").forEach(function (row) {
+        row.addEventListener("dragstart", function (event) {
+            draggedDocumentId = row.dataset.documentId || "";
+            draggedDocumentFolder = row.dataset.documentFolder || "";
+            draggedRow = row;
+            workspace.classList.add("is-document-dragging");
+            row.classList.add("is-dragging");
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", draggedDocumentId);
+            }
+        });
+        row.addEventListener("dragend", clearDropState);
+    });
+
+    workspace.querySelectorAll("[data-folder-drop-zone]").forEach(function (folder) {
+        folder.addEventListener("dragover", function (event) {
+            const targetFolder = folder.dataset.folderName || "";
+            if (!draggedDocumentId || targetFolder === draggedDocumentFolder) {
+                return;
+            }
+            event.preventDefault();
+            folder.classList.add("is-drop-target");
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = "move";
+            }
+        });
+        folder.addEventListener("dragleave", function (event) {
+            if (event.relatedTarget && folder.contains(event.relatedTarget)) {
+                return;
+            }
+            folder.classList.remove("is-drop-target");
+        });
+        folder.addEventListener("drop", function (event) {
+            const targetFolder = folder.dataset.folderName || "";
+            const documentId = (event.dataTransfer && event.dataTransfer.getData("text/plain")) || draggedDocumentId;
+            if (!documentId || targetFolder === draggedDocumentFolder) {
+                clearDropState();
+                return;
+            }
+            event.preventDefault();
+            const form = folder.querySelector("[data-folder-move-form]");
+            const input = form ? form.querySelector("[data-move-document-id]") : null;
+            if (!form || !input) {
+                clearDropState();
+                return;
+            }
+            input.value = documentId;
+            form.submit();
         });
     });
 });

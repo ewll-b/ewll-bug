@@ -3563,6 +3563,69 @@ def create_app(test_config: dict | None = None) -> Flask:
         db.commit()
         return int(cursor.rowcount or 0)
 
+    def move_case_document(document_id: int, folder_name: str) -> int:
+        document = fetch_case_document(document_id)
+        if document is None:
+            return 0
+        target_folder = folder_name.strip() or "测试用例"
+        current_folder = document["folder_name"] or "测试用例"
+        if target_folder == current_folder:
+            return 0
+        db = get_db()
+        duplicate = db.execute(
+            """
+            SELECT 1
+            FROM test_cases
+            WHERE project_id = ?
+                AND COALESCE(version, '') = COALESCE(?, '')
+                AND COALESCE(folder_name, '') = COALESCE(?, '')
+                AND COALESCE(doc_name, '') = COALESCE(?, '')
+            LIMIT 1
+            """,
+            (document["project_id"], document["version"], target_folder, document["doc_name"]),
+        ).fetchone()
+        if duplicate:
+            return -1
+        now = current_time()
+        cursor = db.execute(
+            """
+            UPDATE test_cases
+            SET folder_name = ?, updated_at = ?
+            WHERE project_id = ?
+                AND COALESCE(version, '') = COALESCE(?, '')
+                AND COALESCE(folder_name, '') = COALESCE(?, '')
+                AND COALESCE(doc_name, '') = COALESCE(?, '')
+            """,
+            (
+                target_folder,
+                now,
+                document["project_id"],
+                document["version"],
+                document["folder_name"],
+                document["doc_name"],
+            ),
+        )
+        db.execute(
+            """
+            UPDATE case_document_columns
+            SET folder_name = ?, updated_at = ?
+            WHERE project_id = ?
+                AND COALESCE(version, '') = COALESCE(?, '')
+                AND COALESCE(folder_name, '') = COALESCE(?, '')
+                AND COALESCE(doc_name, '') = COALESCE(?, '')
+            """,
+            (
+                target_folder,
+                now,
+                document["project_id"],
+                document["version"],
+                document["folder_name"],
+                document["doc_name"],
+            ),
+        )
+        db.commit()
+        return int(cursor.rowcount or 0)
+
     def delete_case_folder(folder_name: str) -> None:
         db = get_db()
         db.execute(
@@ -5270,13 +5333,27 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.route("/cases")
     def case_library() -> str:
         selected_version = request.args.get("version", "").strip()
+        selected_folder = request.args.get("folder", "").strip()
         documents = fetch_case_documents(selected_version)
+        case_tree = build_case_tree(documents)
+        folder_names = {item["name"] for item in case_tree}
         document_ids = {int(item["id"]) for item in documents}
         selected_id = int(request.args.get("document_id", "0") or 0)
         if selected_id not in document_ids:
             selected_id = 0
-        if selected_id == 0 and documents:
-            selected_id = int(documents[0]["id"])
+        requested_document = fetch_case_document(selected_id) if selected_id else None
+        if not selected_folder and requested_document is not None:
+            selected_folder = requested_document["folder_name"] or "测试用例"
+        if selected_folder not in folder_names:
+            selected_folder = case_tree[0]["name"] if case_tree else ""
+        visible_documents = [
+            item
+            for item in documents
+            if not selected_folder or (item["folder_name"] or "测试用例") == selected_folder
+        ]
+        visible_document_ids = {int(item["id"]) for item in visible_documents}
+        if selected_id not in visible_document_ids:
+            selected_id = int(visible_documents[0]["id"]) if visible_documents else 0
         selected_document = fetch_case_document(selected_id) if selected_id else None
         selected_document_count = 0
         if selected_document is not None:
@@ -5295,11 +5372,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         return render_template(
             "case_library.html",
             case_documents=documents,
-            case_tree=build_case_tree(documents),
+            visible_case_documents=visible_documents,
+            case_tree=case_tree,
             selected_document=selected_document,
             selected_document_count=selected_document_count,
             distribution=selected_distribution,
             selected_version=selected_version,
+            selected_folder=selected_folder,
             case_versions=fetch_case_versions(),
         )
 
@@ -5764,18 +5843,22 @@ def create_app(test_config: dict | None = None) -> Flask:
         doc_name = request.form.get("doc_name", "").strip()
         document_id = int(request.form.get("document_id", "0") or 0)
         version_filter = request.form.get("version_filter", "").strip()
+        open_folder = request.form.get("open_folder", "").strip()
+        redirect_folder = open_folder
         if action == "create_folder":
             if not folder_name:
                 flash("请输入文件夹名称。", "error")
             else:
                 default_doc_name = f"{folder_name}-在线文档"
                 create_case_document(folder_name, default_doc_name)
+                redirect_folder = folder_name
                 flash("文件夹已创建。", "success")
         elif action == "create_document":
             if not doc_name:
                 flash("请输入在线文档名称。", "error")
             else:
                 create_case_document(folder_name or "测试用例", doc_name)
+                redirect_folder = folder_name or "测试用例"
                 flash("在线文档已创建。", "success")
         elif action == "delete_folder":
             if not folder_name:
@@ -5784,6 +5867,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 flash("仅管理员可删除整个文件夹。", "error")
             else:
                 delete_case_folder(folder_name)
+                redirect_folder = ""
                 flash("文件夹已删除。", "success")
         elif action == "delete_document":
             if document_id <= 0:
@@ -5798,7 +5882,34 @@ def create_app(test_config: dict | None = None) -> Flask:
                         flash("在线文档已删除。", "success")
                     else:
                         flash("在线文档删除失败。", "error")
-        return redirect(url_for("case_library", version=version_filter) if version_filter else url_for("case_library"))
+        elif action == "move_document":
+            target_folder = folder_name or "测试用例"
+            if document_id <= 0:
+                flash("未找到要移动的在线文档。", "error")
+            else:
+                document = fetch_case_document(document_id)
+                if document is not None and int(document["project_id"] or 0) != int(current_project_id() or 0):
+                    flash("只能移动当前项目下的在线文档。", "error")
+                elif not can_manage_case_document(document):
+                    flash("仅管理员或文档创建人可移动在线文档。", "error")
+                else:
+                    moved = move_case_document(document_id, target_folder)
+                    if moved > 0:
+                        redirect_folder = target_folder
+                        flash("在线文档已移动。", "success")
+                    elif moved < 0:
+                        flash("目标文件夹里已有同名在线文档，未移动。", "error")
+                    else:
+                        redirect_folder = target_folder
+                        flash("在线文档已在该文件夹中。", "success")
+        redirect_params: dict[str, object] = {}
+        if version_filter:
+            redirect_params["version"] = version_filter
+        if redirect_folder:
+            redirect_params["folder"] = redirect_folder
+        if action == "move_document" and document_id > 0:
+            redirect_params["document_id"] = document_id
+        return redirect(url_for("case_library", **redirect_params))
 
     @app.route("/requirements")
     def requirement_library() -> str:

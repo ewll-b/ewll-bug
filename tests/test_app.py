@@ -421,6 +421,67 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertIn("用例库".encode("utf-8"), response.data)
         self.assertIn("打开在线文档".encode("utf-8"), response.data)
 
+    def test_case_library_can_move_document_between_folders(self) -> None:
+        self.login_as("admin", "admin123")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            document = conn.execute(
+                """
+                SELECT id, project_id, version, folder_name, doc_name
+                FROM test_cases
+                WHERE project_id = 1
+                ORDER BY id
+                LIMIT 1
+                """
+            ).fetchone()
+            self.assertIsNotNone(document)
+
+        response = self.client.post(
+            "/cases/manage",
+            data={
+                "action": "move_document",
+                "document_id": str(document["id"]),
+                "folder_name": "回归用例",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("folder=", response.headers["Location"])
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            moved_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM test_cases
+                WHERE project_id = ?
+                    AND COALESCE(version, '') = COALESCE(?, '')
+                    AND folder_name = '回归用例'
+                    AND COALESCE(doc_name, '') = COALESCE(?, '')
+                """,
+                (document["project_id"], document["version"], document["doc_name"]),
+            ).fetchone()["count"]
+            old_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM test_cases
+                WHERE project_id = ?
+                    AND COALESCE(version, '') = COALESCE(?, '')
+                    AND folder_name = ?
+                    AND COALESCE(doc_name, '') = COALESCE(?, '')
+                """,
+                (document["project_id"], document["version"], document["folder_name"], document["doc_name"]),
+            ).fetchone()["count"]
+
+        self.assertGreater(moved_count, 0)
+        self.assertEqual(old_count, 0)
+
+        page = self.client.get("/cases?folder=%E5%9B%9E%E5%BD%92%E7%94%A8%E4%BE%8B")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("当前文件夹：回归用例".encode("utf-8"), page.data)
+        self.assertIn('data-folder-drop-zone'.encode("utf-8"), page.data)
+        self.assertIn('draggable="true"'.encode("utf-8"), page.data)
+
     def test_case_document_loads_in_new_page(self) -> None:
         self.login_as("lit", "123456")
         response = self.client.get("/cases/1")
