@@ -626,6 +626,8 @@ document.addEventListener("DOMContentLoaded", function () {
         let wheelAnimationFrame = 0;
         let pendingWheelDelta = 0;
         let movedResetTimer = 0;
+        let scrollEndTimer = 0;
+        let lastScrollLeft = wrap.scrollLeft;
 
         function clampScrollLeft(value) {
             const maxScrollLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
@@ -656,6 +658,19 @@ document.addEventListener("DOMContentLoaded", function () {
             moved = false;
             delete wrap.dataset.dragScrollMoved;
             movedResetTimer = 0;
+        }
+
+        function clearScrollingState() {
+            wrap.classList.remove("is-scrolling-x");
+            scrollEndTimer = 0;
+        }
+
+        function markScrolling() {
+            wrap.classList.add("is-scrolling-x");
+            if (scrollEndTimer) {
+                window.clearTimeout(scrollEndTimer);
+            }
+            scrollEndTimer = window.setTimeout(clearScrollingState, 140);
         }
 
         wrap.addEventListener("pointerdown", function (event) {
@@ -694,6 +709,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
         wrap.addEventListener("wheel", function (event) {
             if (Math.abs(event.deltaX) > 0 && !event.shiftKey) {
+                markScrolling();
                 return;
             }
             if (wrap.scrollWidth <= wrap.clientWidth) {
@@ -714,6 +730,15 @@ document.addEventListener("DOMContentLoaded", function () {
                 pendingWheelDelta = 0;
             });
         }, { passive: false });
+
+        wrap.addEventListener("scroll", function () {
+            const currentScrollLeft = Math.round(wrap.scrollLeft);
+            if (currentScrollLeft === lastScrollLeft) {
+                return;
+            }
+            lastScrollLeft = currentScrollLeft;
+            markScrolling();
+        }, { passive: true });
 
         function stopDrag(event) {
             if (pointerId !== event.pointerId) {

@@ -3444,6 +3444,17 @@ body.is-resizing-panels {
 
 .document-shell {
     padding-bottom: 12px;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+#case-document-form {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .document-toolbar {
@@ -3506,12 +3517,19 @@ body.is-resizing-panels {
 .online-sheet-wrap {
     overflow-x: auto;
     overflow-y: hidden;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     border: 1px solid #d0d7de;
     border-radius: 0;
     background: #ffffff;
     scrollbar-width: auto;
     scrollbar-color: auto;
     box-shadow: none;
+    contain: layout paint;
+    overscroll-behavior-x: contain;
+    will-change: scroll-position;
 }
 
 .online-sheet-wrap::-webkit-scrollbar {
@@ -3569,6 +3587,16 @@ body.is-resizing-panels {
 .online-sheet.drag-scroll-wrap.is-dragging,
 .online-sheet-wrap.is-dragging {
     cursor: grabbing;
+}
+
+.online-sheet-wrap.is-dragging .online-sheet,
+.online-sheet-wrap.is-scrolling-x .online-sheet {
+    pointer-events: none;
+}
+
+.online-sheet-wrap.is-dragging .online-sheet *,
+.online-sheet-wrap.is-scrolling-x .online-sheet * {
+    transition: none !important;
 }
 
 .online-sheet tbody tr {
