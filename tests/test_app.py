@@ -369,9 +369,46 @@ class BugPlatformTestCase(unittest.TestCase):
 
     def test_my_todos_page_loads(self) -> None:
         self.login_as("lit", "123456")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            assignee = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
+            conn.execute(
+                """
+                INSERT INTO bugs (
+                    bug_no, title, project_id, version, module, platform, severity, priority, status,
+                    assignee_id, creator_id, reporter, environment, description,
+                    expected_result, actual_result, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "TODO-001",
+                    "待办端字段测试",
+                    1,
+                    "2.9.0",
+                    "WEB",
+                    "WEB",
+                    "高",
+                    "高",
+                    "open",
+                    assignee["id"],
+                    assignee["id"],
+                    "李婷",
+                    "测试环境",
+                    "验证我的待办展示端字段",
+                    "显示 WEB",
+                    "未显示",
+                    "2026-07-28 10:00:00",
+                    "2026-07-28 10:00:00",
+                ),
+            )
+            conn.commit()
         response = self.client.get("/todos")
         self.assertEqual(response.status_code, 200)
         self.assertIn("我的待办".encode("utf-8"), response.data)
+        self.assertIn('<th class="bug-col-platform">端</th>'.encode("utf-8"), response.data)
+        self.assertIn("platform-chip".encode("utf-8"), response.data)
+        self.assertIn("WEB".encode("utf-8"), response.data)
 
     def test_case_library_loads(self) -> None:
         self.login_as("lit", "123456")
