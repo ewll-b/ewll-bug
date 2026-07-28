@@ -461,9 +461,11 @@ a {
 }
 
 .bug-list-panel .header-toolbar {
-    flex: 1 1 640px;
+    flex: 0 0 auto;
     min-width: 0;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    width: max-content;
+    max-width: none;
 }
 
 .bug-list-panel .list-stats {
