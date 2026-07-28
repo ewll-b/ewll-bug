@@ -203,6 +203,10 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertIn("第 2 / 2 页".encode("utf-8"), response.data)
         self.assertIn('href="/bugs?version=page-test&amp;page=1"'.encode("utf-8"), response.data)
         self.assertIn('aria-current="page">2'.encode("utf-8"), response.data)
+        self.assertIn('class="pager-action"'.encode("utf-8"), response.data)
+        self.assertIn('class="page-number active" aria-current="page">2'.encode("utf-8"), response.data)
+        self.assertNotIn('class="page-jump-form"'.encode("utf-8"), response.data)
+        self.assertNotIn('btn btn-secondary mini page-number'.encode("utf-8"), response.data)
 
     def test_bug_create_form_prefills_selected_version(self) -> None:
         self.login_as("lit", "123456")

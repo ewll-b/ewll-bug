@@ -230,41 +230,29 @@
     </div>
 
     {% if bug_page.pages > 1 %}
-        <nav class="pager page-jump-row bug-pager" aria-label="Bug列表分页">
+        <nav class="pager bug-pager" aria-label="Bug列表分页">
             <div class="pager-summary">第 {{ bug_page.page }} / {{ bug_page.pages }} 页</div>
             <div class="page-number-list">
                 {% if bug_page.has_prev %}
-                    <a class="btn btn-secondary mini pager-action" href="{{ build_page_url(bug_page.page - 1, filters) }}">上一页</a>
+                    <a class="pager-action" href="{{ build_page_url(bug_page.page - 1, filters) }}">上一页</a>
                 {% else %}
-                    <span class="btn btn-secondary mini pager-action disabled" aria-disabled="true">上一页</span>
+                    <span class="pager-action disabled" aria-disabled="true">上一页</span>
                 {% endif %}
                 {% for item in bug_page.page_items %}
                     {% if item.type == "ellipsis" %}
                         <span class="pager-ellipsis" aria-hidden="true">...</span>
                     {% elif item.current %}
-                        <span class="btn btn-secondary mini page-number active" aria-current="page">{{ item.page }}</span>
+                        <span class="page-number active" aria-current="page">{{ item.page }}</span>
                     {% else %}
-                        <a class="btn btn-secondary mini page-number" href="{{ build_page_url(item.page, filters) }}">{{ item.page }}</a>
+                        <a class="page-number" href="{{ build_page_url(item.page, filters) }}">{{ item.page }}</a>
                     {% endif %}
                 {% endfor %}
                 {% if bug_page.has_next %}
-                    <a class="btn btn-secondary mini pager-action" href="{{ build_page_url(bug_page.page + 1, filters) }}">下一页</a>
+                    <a class="pager-action" href="{{ build_page_url(bug_page.page + 1, filters) }}">下一页</a>
                 {% else %}
-                    <span class="btn btn-secondary mini pager-action disabled" aria-disabled="true">下一页</span>
+                    <span class="pager-action disabled" aria-disabled="true">下一页</span>
                 {% endif %}
             </div>
-            <form class="page-jump-form" method="get" action="{{ build_page_jump_url(filters) }}">
-                <input type="hidden" name="keyword" value="{{ filters.keyword }}">
-                <input type="hidden" name="version" value="{{ filters.version }}">
-                <input type="hidden" name="platform" value="{{ filters.platform }}">
-                <input type="hidden" name="creator_id" value="{{ filters.creator_id }}">
-                <input type="hidden" name="assignee_id" value="{{ filters.assignee_id }}">
-                <input type="hidden" name="status" value="{{ filters.status }}">
-                <input type="hidden" name="created_from" value="{{ filters.created_from }}">
-                <input type="hidden" name="created_to" value="{{ filters.created_to }}">
-                <input class="page-jump-input" type="number" name="page" min="1" max="{{ bug_page.pages }}" value="{{ bug_page.page }}">
-                <button class="btn btn-secondary mini" type="submit">跳转</button>
-            </form>
         </nav>
     {% endif %}
 </section>
