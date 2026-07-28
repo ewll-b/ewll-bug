@@ -619,8 +619,44 @@ document.addEventListener("DOMContentLoaded", function () {
     document.querySelectorAll("[data-drag-scroll]").forEach(function (wrap) {
         let pointerId = null;
         let startX = 0;
+        let lastX = 0;
         let startScrollLeft = 0;
         let moved = false;
+        let animationFrame = 0;
+        let wheelAnimationFrame = 0;
+        let pendingWheelDelta = 0;
+        let movedResetTimer = 0;
+
+        function clampScrollLeft(value) {
+            const maxScrollLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+            return Math.max(0, Math.min(maxScrollLeft, value));
+        }
+
+        function applyDragScroll() {
+            animationFrame = 0;
+            wrap.scrollLeft = clampScrollLeft(startScrollLeft - (lastX - startX));
+        }
+
+        function scheduleDragScroll() {
+            if (animationFrame) {
+                return;
+            }
+            animationFrame = window.requestAnimationFrame(applyDragScroll);
+        }
+
+        function setMoved() {
+            if (moved) {
+                return;
+            }
+            moved = true;
+            wrap.dataset.dragScrollMoved = "1";
+        }
+
+        function clearMovedState() {
+            moved = false;
+            delete wrap.dataset.dragScrollMoved;
+            movedResetTimer = 0;
+        }
 
         wrap.addEventListener("pointerdown", function (event) {
             const interactiveTarget = event.target.closest("a, button, input, select, textarea, summary, label");
@@ -628,8 +664,13 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
             pointerId = event.pointerId;
-            moved = false;
+            if (movedResetTimer) {
+                window.clearTimeout(movedResetTimer);
+                movedResetTimer = 0;
+            }
+            clearMovedState();
             startX = event.clientX;
+            lastX = event.clientX;
             startScrollLeft = wrap.scrollLeft;
             wrap.classList.add("is-dragging");
             wrap.setPointerCapture(pointerId);
@@ -639,40 +680,57 @@ document.addEventListener("DOMContentLoaded", function () {
             if (pointerId !== event.pointerId) {
                 return;
             }
-            const deltaX = event.clientX - startX;
-            if (Math.abs(deltaX) > 4) {
-                moved = true;
-            }
-            wrap.scrollLeft = startScrollLeft - deltaX;
-        });
-
-        wrap.addEventListener("wheel", function (event) {
-            const maxScrollLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
-            if (maxScrollLeft <= 0) {
+            lastX = event.clientX;
+            const deltaX = lastX - startX;
+            if (Math.abs(deltaX) <= 4 && !moved) {
                 return;
             }
-            const horizontalDelta = Math.abs(event.deltaX) > 0 ? event.deltaX : 0;
-            const shiftWheelDelta = event.shiftKey && Math.abs(event.deltaY) > 0 ? event.deltaY : 0;
-            const delta = horizontalDelta || shiftWheelDelta;
+            if (Math.abs(deltaX) > 4) {
+                setMoved();
+            }
+            event.preventDefault();
+            scheduleDragScroll();
+        }, { passive: false });
+
+        wrap.addEventListener("wheel", function (event) {
+            if (Math.abs(event.deltaX) > 0 && !event.shiftKey) {
+                return;
+            }
+            if (wrap.scrollWidth <= wrap.clientWidth) {
+                return;
+            }
+            const delta = event.shiftKey && Math.abs(event.deltaY) > 0 ? event.deltaY : 0;
             if (!delta) {
                 return;
             }
             event.preventDefault();
-            wrap.scrollLeft = Math.max(0, Math.min(maxScrollLeft, wrap.scrollLeft + delta));
+            pendingWheelDelta += delta;
+            if (wheelAnimationFrame) {
+                return;
+            }
+            wheelAnimationFrame = window.requestAnimationFrame(function () {
+                wheelAnimationFrame = 0;
+                wrap.scrollLeft = clampScrollLeft(wrap.scrollLeft + pendingWheelDelta);
+                pendingWheelDelta = 0;
+            });
         }, { passive: false });
 
         function stopDrag(event) {
             if (pointerId !== event.pointerId) {
                 return;
             }
+            if (animationFrame) {
+                window.cancelAnimationFrame(animationFrame);
+                applyDragScroll();
+            }
             if (wrap.hasPointerCapture(pointerId)) {
                 wrap.releasePointerCapture(pointerId);
             }
             pointerId = null;
             wrap.classList.remove("is-dragging");
-            window.setTimeout(function () {
-                moved = false;
-            }, 0);
+            if (moved) {
+                movedResetTimer = window.setTimeout(clearMovedState, 180);
+            }
         }
 
         wrap.addEventListener("pointerup", stopDrag);
@@ -684,7 +742,7 @@ document.addEventListener("DOMContentLoaded", function () {
         });
 
         wrap.addEventListener("click", function (event) {
-            if (moved) {
+            if (moved || wrap.dataset.dragScrollMoved === "1") {
                 event.preventDefault();
                 event.stopPropagation();
             }
@@ -856,6 +914,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
         row.addEventListener("click", function (event) {
             if (event.target.closest("a, button, input, select, textarea, summary, label, details, form")) {
+                return;
+            }
+            const dragWrap = row.closest("[data-drag-scroll]");
+            if (dragWrap && dragWrap.dataset.dragScrollMoved === "1") {
                 return;
             }
             openRowLink();

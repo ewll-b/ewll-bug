@@ -418,6 +418,9 @@ a {
     min-height: calc(100vh - var(--layout-header-height) - 56px);
     display: flex;
     flex-direction: column;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .panel-head {
@@ -437,6 +440,8 @@ a {
 
 .list-header-wrap {
     overflow-x: auto;
+    min-width: 0;
+    max-width: 100%;
     margin-bottom: 14px;
 }
 
@@ -447,6 +452,25 @@ a {
     gap: 12px;
     min-width: 1240px;
     flex-wrap: nowrap;
+}
+
+.bug-list-panel .list-header {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+}
+
+.bug-list-panel .header-toolbar {
+    flex: 1 1 640px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.bug-list-panel .list-stats {
+    flex: 1 1 100%;
+    min-width: 0;
+    margin-left: 0;
+    flex-wrap: wrap;
 }
 
 .list-page-title {
@@ -700,7 +724,9 @@ a {
 .table-wrap {
     overflow-x: auto;
     flex: 1 1 auto;
+    min-width: 0;
     width: 100%;
+    box-sizing: border-box;
 }
 
 .drag-scroll-wrap {
@@ -713,6 +739,15 @@ a {
 .drag-scroll-wrap.is-dragging {
     cursor: grabbing;
     user-select: none;
+}
+
+.drag-scroll-wrap.is-dragging .bug-row,
+.drag-scroll-wrap.is-dragging .bug-row * {
+    cursor: grabbing;
+}
+
+.drag-scroll-wrap.is-dragging .bug-row td {
+    transition: none;
 }
 
 .data-table {
