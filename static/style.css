@@ -510,6 +510,25 @@ a {
     color: #606266;
 }
 
+.upload-destination {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    background: #f2faf7;
+    border: 1px solid #cfe4dc;
+    color: #6b7d88;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.upload-destination strong {
+    color: #173a47;
+    font-weight: 800;
+}
+
 .btn {
     display: inline-flex;
     align-items: center;

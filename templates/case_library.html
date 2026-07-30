@@ -18,9 +18,11 @@
 
     <form class="upload-bar" method="post" action="{{ url_for('upload_cases') }}" enctype="multipart/form-data">
         <input type="hidden" name="version_filter" value="{{ selected_version or '' }}">
+        <input type="hidden" name="folder_name" value="{{ selected_folder }}">
         <span>上传 Excel 自动生成在线文档</span>
+        <span class="upload-destination">上传到：<strong>{{ selected_folder or "请选择文件夹" }}</strong></span>
         <input type="file" name="excel_file" accept=".xlsx,.xlsm,.xltx,.xltm">
-        <button class="btn btn-primary mini" type="submit">上传并同步</button>
+        <button class="btn btn-primary mini" type="submit" {% if not selected_folder %}disabled{% endif %}>上传并同步</button>
     </form>
 
     <form class="toolbar compact-toolbar header-toolbar" method="get" action="{{ url_for('case_library') }}">

@@ -52,6 +52,11 @@ class FakeGroupReportResponse:
         return None
 
     def read(self) -> bytes:
+        url = getattr(self.request_obj, "full_url", "")
+        if "tenant_access_token/internal" in url:
+            return b'{"code":0,"tenant_access_token":"mock-tenant-token"}'
+        if "/im/v1/images" in url:
+            return b'{"code":0,"data":{"image_key":"img_mock_daily_report"}}'
         return b'{"code":0,"msg":"success"}'
 
 
@@ -482,6 +487,41 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertIn('data-folder-drop-zone'.encode("utf-8"), page.data)
         self.assertIn('draggable="true"'.encode("utf-8"), page.data)
 
+    def test_case_library_create_folder_without_document(self) -> None:
+        self.login_as("admin", "admin123")
+        response = self.client.post(
+            "/cases/manage",
+            data={"action": "create_folder", "folder_name": "空文件夹"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("当前文件夹：空文件夹".encode("utf-8"), response.data)
+        self.assertIn("当前文件夹暂无在线文档".encode("utf-8"), response.data)
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            folder = conn.execute(
+                """
+                SELECT id
+                FROM case_folders
+                WHERE project_id = 1 AND name = ?
+                """,
+                ("空文件夹",),
+            ).fetchone()
+            auto_document_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM test_cases
+                WHERE project_id = 1
+                    AND folder_name = ?
+                    AND doc_name = ?
+                """,
+                ("空文件夹", "空文件夹-在线文档"),
+            ).fetchone()["count"]
+
+        self.assertIsNotNone(folder)
+        self.assertEqual(auto_document_count, 0)
+
     def test_case_document_loads_in_new_page(self) -> None:
         self.login_as("lit", "123456")
         response = self.client.get("/cases/1")
@@ -770,19 +810,56 @@ class BugPlatformTestCase(unittest.TestCase):
         excel = self.build_excel_file()
         response = self.client.post(
             "/cases/upload",
-            data={"excel_file": (excel, "cases.xlsx")},
+            data={"excel_file": (excel, "cases.xlsx"), "folder_name": "测试组"},
             content_type="multipart/form-data",
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("已同步".encode("utf-8"), response.data)
 
+    def test_case_upload_uses_selected_folder(self) -> None:
+        self.login_as("lit", "123456")
+        excel = self.build_standard_case_excel_file()
+        response = self.client.post(
+            "/cases/upload",
+            data={"excel_file": (excel, "folder_cases.xlsx"), "folder_name": "回归上传"},
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("folder=%E5%9B%9E%E5%BD%92%E4%B8%8A%E4%BC%A0", response.headers["Location"])
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT folder_name, doc_name
+                FROM test_cases
+                WHERE case_no = ?
+                """,
+                ("2.7.0-TC-001",),
+            ).fetchone()
+            excel_import_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM test_cases
+                WHERE folder_name = 'Excel导入'
+                    AND doc_name = ?
+                """,
+                ("folder_cases",),
+            ).fetchone()["count"]
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row["folder_name"], "回归上传")
+        self.assertEqual(row["doc_name"], "folder_cases")
+        self.assertEqual(excel_import_count, 0)
+
     def test_case_upload_standard_template_keeps_columns_aligned(self) -> None:
         self.login_as("lit", "123456")
         excel = self.build_standard_case_excel_file()
         response = self.client.post(
             "/cases/upload",
-            data={"excel_file": (excel, "standard_cases.xlsx")},
+            data={"excel_file": (excel, "standard_cases.xlsx"), "folder_name": "测试组"},
             content_type="multipart/form-data",
             follow_redirects=True,
         )
@@ -807,7 +884,7 @@ class BugPlatformTestCase(unittest.TestCase):
         excel = self.build_case_excel_file_with_sparse_tail_rows()
         response = self.client.post(
             "/cases/upload",
-            data={"excel_file": (excel, "sparse_tail_cases.xlsx")},
+            data={"excel_file": (excel, "sparse_tail_cases.xlsx"), "folder_name": "测试组"},
             content_type="multipart/form-data",
             follow_redirects=True,
         )
@@ -949,6 +1026,29 @@ class BugPlatformTestCase(unittest.TestCase):
     def test_create_bug_sends_project_group_notification(self, _mocked_urlopen) -> None:
         FakeGroupReportResponse.captured_requests = []
         with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO requirements (
+                    project_id, code, title, version, status, priority, description,
+                    acceptance_criteria, creator_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    "REQ-GROUP-001",
+                    "项目群通知需求",
+                    "2.9.0",
+                    "pending",
+                    "中",
+                    "用于验证群通知卡片的需求",
+                    "通知卡片可打开需求页",
+                    1,
+                    "2026-07-29 10:00:00",
+                    "2026-07-29 10:00:00",
+                ),
+            )
+            requirement_id = cursor.lastrowid
             conn.execute(
                 """
                 UPDATE projects
@@ -975,6 +1075,7 @@ class BugPlatformTestCase(unittest.TestCase):
                 "platform": "Android",
                 "severity": "中",
                 "assignee_id": "2",
+                "requirement_id": str(requirement_id),
                 "environment": "测试环境",
                 "description": "创建后需要同步到项目群",
                 "expected_result": "功能正常",
@@ -987,12 +1088,18 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(len(FakeGroupReportResponse.captured_requests), 1)
 
         payload = json.loads(FakeGroupReportResponse.captured_requests[0].data.decode("utf-8"))
-        message_text = payload["content"]["text"]
-        self.assertIn("新建 Bug 通知", message_text)
-        self.assertIn("需要发送到项目群的Bug", message_text)
-        self.assertIn("项目：零售增长平台", message_text)
-        self.assertIn("当前处理人：周越", message_text)
-        self.assertIn("详情链接：http://bug.test.local/bugs/", message_text)
+        payload_text = json.dumps(payload, ensure_ascii=False)
+        self.assertEqual(payload["msg_type"], "interactive")
+        self.assertEqual(payload["card"]["header"]["template"], "red")
+        self.assertEqual(payload["card"]["header"]["title"]["content"], "新建 Bug")
+        self.assertIn("需要发送到项目群的Bug", payload_text)
+        self.assertIn("项目：** 零售增长平台", payload_text)
+        self.assertIn("负责人：** 周越", payload_text)
+        self.assertIn("查看 Bug 详情", payload_text)
+        self.assertIn("进入需求页", payload_text)
+        self.assertIn("AI处理", payload_text)
+        self.assertIn("http://bug.test.local/bugs/", payload_text)
+        self.assertIn("http://bug.test.local/requirements/", payload_text)
         self.assertEqual(FakeGroupReportResponse.captured_requests[0].full_url, "https://open.feishu.cn/open-apis/bot/v2/hook/project-webhook")
 
     @mock.patch("app.urllib_request.urlopen", side_effect=fake_group_report_urlopen)
@@ -1054,10 +1161,11 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(FakeGroupReportResponse.captured_requests[0].full_url, "https://open.feishu.cn/open-apis/bot/v2/hook/h5-webhook")
 
         payload = json.loads(FakeGroupReportResponse.captured_requests[0].data.decode("utf-8"))
-        message_text = payload["content"]["text"]
-        self.assertIn("H5页面按钮不可点击", message_text)
-        self.assertIn("端：H5", message_text)
-        self.assertNotIn("模块：", message_text)
+        payload_text = json.dumps(payload, ensure_ascii=False)
+        self.assertEqual(payload["msg_type"], "interactive")
+        self.assertIn("H5页面按钮不可点击", payload_text)
+        self.assertIn("端：** H5", payload_text)
+        self.assertNotIn("模块：", payload_text)
 
     @mock.patch("app.urllib_request.urlopen", side_effect=fake_group_report_urlopen)
     def test_create_bug_without_project_group_config_does_not_send_group_message(self, _mocked_urlopen) -> None:
@@ -1122,6 +1230,7 @@ class BugPlatformTestCase(unittest.TestCase):
                     ("904", "双端已关闭 Bug", "APP", "双端", "closed"),
                 ],
             )
+            conn.execute("UPDATE bugs SET severity = '最高' WHERE bug_no = '901'")
             conn.commit()
         save_response = self.client.post(
             "/admin",
@@ -1131,16 +1240,21 @@ class BugPlatformTestCase(unittest.TestCase):
                 "next": "/admin/report-notify",
                 "enabled": "1",
                 "send_time": "18:00",
+                "message_format": "card",
                 "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/mock-webhook",
                 "secret": "",
                 "project_id": "1",
                 "version": "9.9.0",
                 "base_url": "http://127.0.0.1:5050",
+                "manual_note": "今天重点关注支付回归\n客户端提测较晚，晚点补最终结论",
+                "tracking_progress": "60%",
             },
             follow_redirects=True,
         )
         self.assertEqual(save_response.status_code, 200)
         self.assertIn("群测试报告通知设置已保存".encode("utf-8"), save_response.data)
+        self.assertIn("今天重点关注支付回归".encode("utf-8"), save_response.data)
+        self.assertIn("60%".encode("utf-8"), save_response.data)
 
         response = self.client.post(
             "/admin",
@@ -1148,31 +1262,203 @@ class BugPlatformTestCase(unittest.TestCase):
                 "entity": "report_notify",
                 "action": "send_test",
                 "next": "/admin/report-notify",
-                "manual_note": "今天重点关注支付回归\n客户端提测较晚，晚点补最终结论",
             },
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("测试发送成功".encode("utf-8"), response.data)
-        self.assertIn("已附带手动备注".encode("utf-8"), response.data)
+        self.assertIn("已附带补充信息".encode("utf-8"), response.data)
         self.assertEqual(len(FakeGroupReportResponse.captured_requests), 1)
 
         payload = json.loads(FakeGroupReportResponse.captured_requests[0].data.decode("utf-8"))
-        message_text = payload["content"]["text"]
-        self.assertIn("测试项目：零售增长平台9.9.0", message_text)
-        self.assertIn("• 缺陷情况", message_text)
-        self.assertIn("• 发现 Bug 数：4", message_text)
-        self.assertIn("• 修复 Bug 数：2", message_text)
-        self.assertIn("• 已回归验证：1", message_text)
-        self.assertIn("• 还打开 Bug 数：2", message_text)
-        self.assertIn("  Android：1", message_text)
-        self.assertIn("  IOS：1", message_text)
-        self.assertNotIn("  H5：", message_text)
-        self.assertNotIn("  双端：", message_text)
-        self.assertIn("• 今日风险/备注：", message_text)
-        self.assertNotIn("• 手动备注：", message_text)
-        self.assertIn("今天重点关注支付回归", message_text)
-        self.assertIn("客户端提测较晚，晚点补最终结论", message_text)
+        payload_text = json.dumps(payload, ensure_ascii=False)
+        self.assertEqual(payload["msg_type"], "interactive")
+        self.assertEqual(payload["card"]["schema"], "2.0")
+        self.assertNotIn("width_mode", payload["card"]["config"])
+        self.assertEqual(payload["card"]["config"]["summary"]["content"], "QA 测试日报")
+        self.assertNotIn("fallback", payload["card"])
+        self.assertNotIn("rgba(", payload_text)
+        self.assertIn("indigo-900", payload_text)
+        self.assertIn("turquoise-50", payload_text)
+        self.assertIn("interactive_container", payload_text)
+        self.assertIn('"tag": "column_set"', payload_text)
+        self.assertIn('"tag": "column"', payload_text)
+        self.assertIn('"flex_mode": "flow"', payload_text)
+        self.assertIn('"flex_mode": "bisect"', payload_text)
+        self.assertIn("12px 18px 12px 18px", payload_text)
+        self.assertIn("10px 14px 10px 14px", payload_text)
+        self.assertIn("6px 16px 0px 16px", payload_text)
+        self.assertNotIn('"padding": "20px"', payload_text)
+        self.assertNotIn('"padding": "18px"', payload_text)
+        self.assertNotIn("16px 24px 16px 24px", payload_text)
+        self.assertNotIn("14px 24px 0px 24px", payload_text)
+        self.assertIn("<text_tag color='green'>有风险</text_tag>", payload_text)
+        self.assertNotIn("单列卡片", payload_text)
+        self.assertIn("QA 测试日报", payload_text)
+        self.assertIn("测试日报", payload_text)
+        self.assertIn("零售增长平台 9.9.0", payload_text)
+        self.assertIn("发布前收尾验证", payload_text)
+        self.assertIn("今日结论", payload_text)
+        self.assertIn("整体进度", payload_text)
+        self.assertIn("用例执行", payload_text)
+        self.assertIn("缺陷修复", payload_text)
+        self.assertIn("打开缺陷", payload_text)
+        self.assertNotIn("进入发版前收尾阶段", payload_text)
+        self.assertNotIn("测试进度", payload_text)
+        self.assertNotIn("用例执行进度与整体风险状态", payload_text)
+        self.assertIn("缺陷闭环", payload_text)
+        self.assertIn("发现 · 修复 · 回归 · 打开缺陷状态一屏看清", payload_text)
+        self.assertIn("发现 4 → 修复 2 → 回归 1 → 打开 2", payload_text)
+        self.assertIn("Android 1", payload_text)
+        self.assertIn("IOS 1", payload_text)
+        self.assertNotIn("H5 1", payload_text)
+        self.assertNotIn("双端 1", payload_text)
+        self.assertIn("严重 Bug / 风险备注", payload_text)
+        self.assertIn("严重 Bug 汇总：1 个待处理", payload_text)
+        self.assertIn("Android 未关闭 Bug", payload_text)
+        self.assertIn("已打开 / 周越", payload_text)
+        self.assertIn("风险备注", payload_text)
+        self.assertNotIn("手动补充", payload_text)
+        self.assertNotIn("暂无未关闭严重 Bug", payload_text)
+        self.assertIn("建议日报结构：结论先行 / 关键指标 / 缺陷闭环 / 风险备注", payload_text)
+        self.assertIn("QA Daily Report", payload_text)
+        self.assertNotIn("明日/下一步", payload_text)
+        self.assertNotIn("下一步", payload_text)
+        self.assertNotIn("完成剩余用例", payload_text)
+        self.assertIn("今天重点关注支付回归", payload_text)
+        self.assertIn("客户端提测较晚，晚点补最终结论", payload_text)
+        self.assertIn("埋点进度：60%", payload_text)
+
+    @mock.patch("app.urllib_request.urlopen", side_effect=fake_group_report_urlopen)
+    def test_manual_group_report_can_send_image_message(self, _mocked_urlopen) -> None:
+        FakeGroupReportResponse.captured_requests = []
+        self.login_as("admin", "admin123")
+        save_response = self.client.post(
+            "/admin",
+            data={
+                "entity": "report_notify",
+                "action": "update",
+                "next": "/admin/report-notify",
+                "enabled": "1",
+                "send_time": "18:00",
+                "message_format": "image",
+                "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/mock-webhook",
+                "secret": "",
+                "lark_app_id": "cli_mock",
+                "lark_app_secret": "mock-secret",
+                "project_id": "1",
+                "version": "2.9.0",
+                "base_url": "http://127.0.0.1:5050",
+                "manual_note": "图片日报备注",
+                "tracking_progress": "60%",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(save_response.status_code, 200)
+
+        response = self.client.post(
+            "/admin",
+            data={
+                "entity": "report_notify",
+                "action": "send_test",
+                "next": "/admin/report-notify",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("图片消息测试报告".encode("utf-8"), response.data)
+        self.assertEqual(len(FakeGroupReportResponse.captured_requests), 3)
+
+        token_request = FakeGroupReportResponse.captured_requests[0]
+        token_payload = json.loads(token_request.data.decode("utf-8"))
+        self.assertEqual(token_request.full_url, "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
+        self.assertEqual(token_payload["app_id"], "cli_mock")
+        self.assertEqual(token_payload["app_secret"], "mock-secret")
+
+        upload_request = FakeGroupReportResponse.captured_requests[1]
+        self.assertEqual(upload_request.full_url, "https://open.feishu.cn/open-apis/im/v1/images")
+        self.assertIn(b'image_type"\r\n\r\nmessage', upload_request.data)
+        self.assertIn(b"\x89PNG\r\n\x1a\n", upload_request.data)
+
+        webhook_request = FakeGroupReportResponse.captured_requests[2]
+        self.assertEqual(webhook_request.full_url, "https://open.feishu.cn/open-apis/bot/v2/hook/mock-webhook")
+        payload = json.loads(webhook_request.data.decode("utf-8"))
+        self.assertEqual(payload["msg_type"], "image")
+        self.assertEqual(payload["content"]["image_key"], "img_mock_daily_report")
+
+    @mock.patch("app.urllib_request.urlopen", side_effect=fake_group_report_urlopen)
+    def test_group_report_direct_image_requires_lark_app_credentials(self, _mocked_urlopen) -> None:
+        FakeGroupReportResponse.captured_requests = []
+        self.login_as("admin", "admin123")
+        save_response = self.client.post(
+            "/admin",
+            data={
+                "entity": "report_notify",
+                "action": "update",
+                "next": "/admin/report-notify",
+                "enabled": "1",
+                "send_time": "18:00",
+                "message_format": "image",
+                "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/mock-webhook",
+                "secret": "",
+                "lark_app_id": "",
+                "lark_app_secret": "",
+                "project_id": "1",
+                "version": "2.9.0",
+                "base_url": "",
+                "manual_note": "直接展示日报备注",
+                "tracking_progress": "60%",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(save_response.status_code, 200)
+        self.assertIn("选择图片消息时，请填写飞书应用 App ID 和 App Secret。".encode("utf-8"), save_response.data)
+        self.assertEqual(len(FakeGroupReportResponse.captured_requests), 0)
+
+    @mock.patch("app.urllib_request.urlopen", side_effect=fake_group_report_urlopen)
+    def test_group_report_manual_note_without_severe_bug_skips_empty_risk_line(self, _mocked_urlopen) -> None:
+        FakeGroupReportResponse.captured_requests = []
+        self.login_as("admin", "admin123")
+        response = self.client.post(
+            "/admin",
+            data={
+                "entity": "report_notify",
+                "action": "update",
+                "next": "/admin/report-notify",
+                "enabled": "1",
+                "send_time": "18:00",
+                "message_format": "card",
+                "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/mock-webhook",
+                "secret": "",
+                "project_id": "1",
+                "version": "2.9.0",
+                "base_url": "http://127.0.0.1:5050",
+                "manual_note": "123345",
+                "tracking_progress": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(
+            "/admin",
+            data={
+                "entity": "report_notify",
+                "action": "send_test",
+                "next": "/admin/report-notify",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(FakeGroupReportResponse.captured_requests), 1)
+
+        payload = json.loads(FakeGroupReportResponse.captured_requests[0].data.decode("utf-8"))
+        payload_text = json.dumps(payload, ensure_ascii=False)
+        self.assertIn("严重 Bug 汇总：0 个待处理", payload_text)
+        self.assertIn("风险备注", payload_text)
+        self.assertNotIn("手动补充", payload_text)
+        self.assertIn("123345", payload_text)
+        self.assertNotIn("暂无未关闭严重 Bug", payload_text)
 
     def test_add_bug_comment_displays_in_bug_activity(self) -> None:
         self.login_as("lit", "123456")

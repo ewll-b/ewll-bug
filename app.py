@@ -164,9 +164,18 @@ DEFAULT_GROUP_REPORT_SETTINGS = {
     "project_id": "",
     "version": "",
     "base_url": "",
+    "manual_note": "",
+    "tracking_progress": "",
+    "message_format": "card",
+    "lark_app_id": "",
+    "lark_app_secret": "",
     "last_sent_at": "",
     "last_sent_date": "",
     "last_result": "",
+}
+GROUP_REPORT_MESSAGE_FORMATS = {
+    "image": "飞书图片消息",
+    "card": "自适应卡片消息",
 }
 CASE_STATUS_OPTIONS = ["未测", "通过", "失败", "受阻", "跳过"]
 CASE_STATUS_COLORS = {
@@ -598,6 +607,16 @@ def create_app(test_config: dict | None = None) -> Flask:
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS case_folders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            creator_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(project_id, name)
+        );
+
         CREATE TABLE IF NOT EXISTS case_document_cells (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             column_id INTEGER NOT NULL,
@@ -718,6 +737,11 @@ def create_app(test_config: dict | None = None) -> Flask:
             report_notify_project_id INTEGER,
             report_notify_version TEXT,
             report_notify_base_url TEXT,
+            report_notify_manual_note TEXT,
+            report_notify_tracking_progress TEXT,
+            report_notify_message_format TEXT,
+            report_notify_lark_app_id TEXT,
+            report_notify_lark_app_secret TEXT,
             report_notify_last_sent_at TEXT,
             report_notify_last_sent_date TEXT,
             report_notify_last_result TEXT
@@ -767,6 +791,16 @@ def create_app(test_config: dict | None = None) -> Flask:
             CREATE INDEX IF NOT EXISTS idx_case_document_cells_case
             ON case_document_cells(case_id);
 
+            CREATE TABLE IF NOT EXISTS case_folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                creator_id INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(project_id, name)
+            );
+
             CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -804,6 +838,9 @@ def create_app(test_config: dict | None = None) -> Flask:
 
             CREATE INDEX IF NOT EXISTS idx_project_bug_notify_rules_project
             ON project_bug_notify_rules(project_id);
+
+            CREATE INDEX IF NOT EXISTS idx_case_folders_project_name
+            ON case_folders(project_id, name);
             """
         )
         for table, column_sqls in {
@@ -842,6 +879,11 @@ def create_app(test_config: dict | None = None) -> Flask:
                 ("report_notify_project_id", "ALTER TABLE mail_settings ADD COLUMN report_notify_project_id INTEGER"),
                 ("report_notify_version", "ALTER TABLE mail_settings ADD COLUMN report_notify_version TEXT"),
                 ("report_notify_base_url", "ALTER TABLE mail_settings ADD COLUMN report_notify_base_url TEXT"),
+                ("report_notify_manual_note", "ALTER TABLE mail_settings ADD COLUMN report_notify_manual_note TEXT"),
+                ("report_notify_tracking_progress", "ALTER TABLE mail_settings ADD COLUMN report_notify_tracking_progress TEXT"),
+                ("report_notify_message_format", "ALTER TABLE mail_settings ADD COLUMN report_notify_message_format TEXT"),
+                ("report_notify_lark_app_id", "ALTER TABLE mail_settings ADD COLUMN report_notify_lark_app_id TEXT"),
+                ("report_notify_lark_app_secret", "ALTER TABLE mail_settings ADD COLUMN report_notify_lark_app_secret TEXT"),
                 ("report_notify_last_sent_at", "ALTER TABLE mail_settings ADD COLUMN report_notify_last_sent_at TEXT"),
                 ("report_notify_last_sent_date", "ALTER TABLE mail_settings ADD COLUMN report_notify_last_sent_date TEXT"),
                 ("report_notify_last_result", "ALTER TABLE mail_settings ADD COLUMN report_notify_last_result TEXT"),
@@ -916,8 +958,10 @@ def create_app(test_config: dict | None = None) -> Flask:
                     from_email, sender_name, send_time, last_sent_at, last_sent_date, last_result,
                     report_notify_enabled, report_notify_webhook, report_notify_secret, report_notify_send_time,
                     report_notify_project_id, report_notify_version, report_notify_base_url,
+                    report_notify_manual_note, report_notify_tracking_progress,
+                    report_notify_message_format, report_notify_lark_app_id, report_notify_lark_app_secret,
                     report_notify_last_sent_at, report_notify_last_sent_date, report_notify_last_result
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     1,
@@ -940,6 +984,11 @@ def create_app(test_config: dict | None = None) -> Flask:
                     None,
                     DEFAULT_GROUP_REPORT_SETTINGS["version"],
                     DEFAULT_GROUP_REPORT_SETTINGS["base_url"],
+                    DEFAULT_GROUP_REPORT_SETTINGS["manual_note"],
+                    DEFAULT_GROUP_REPORT_SETTINGS["tracking_progress"],
+                    DEFAULT_GROUP_REPORT_SETTINGS["message_format"],
+                    DEFAULT_GROUP_REPORT_SETTINGS["lark_app_id"],
+                    DEFAULT_GROUP_REPORT_SETTINGS["lark_app_secret"],
                     DEFAULT_GROUP_REPORT_SETTINGS["last_sent_at"],
                     DEFAULT_GROUP_REPORT_SETTINGS["last_sent_date"],
                     DEFAULT_GROUP_REPORT_SETTINGS["last_result"],
@@ -1198,6 +1247,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         row = get_db().execute("SELECT * FROM mail_settings WHERE id = 1").fetchone()
         if row is None:
             return DEFAULT_GROUP_REPORT_SETTINGS.copy()
+        message_format = row["report_notify_message_format"] or DEFAULT_GROUP_REPORT_SETTINGS["message_format"]
+        if message_format not in GROUP_REPORT_MESSAGE_FORMATS:
+            message_format = DEFAULT_GROUP_REPORT_SETTINGS["message_format"]
         settings = DEFAULT_GROUP_REPORT_SETTINGS.copy()
         settings.update(
             {
@@ -1208,6 +1260,11 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "project_id": str(row["report_notify_project_id"] or ""),
                 "version": row["report_notify_version"] or "",
                 "base_url": row["report_notify_base_url"] or "",
+                "manual_note": row["report_notify_manual_note"] or "",
+                "tracking_progress": row["report_notify_tracking_progress"] or "",
+                "message_format": message_format,
+                "lark_app_id": row["report_notify_lark_app_id"] or "",
+                "lark_app_secret": row["report_notify_lark_app_secret"] or "",
                 "last_sent_at": row["report_notify_last_sent_at"] or "",
                 "last_sent_date": row["report_notify_last_sent_date"] or "",
                 "last_result": row["report_notify_last_result"] or "",
@@ -1255,6 +1312,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         project_id_text = form.get("project_id", "").strip()
         version = form.get("version", "").strip()
         base_url = form.get("base_url", "").strip()
+        manual_note = form.get("manual_note", "").strip()
+        tracking_progress = form.get("tracking_progress", "").strip()
+        message_format = form.get("message_format", DEFAULT_GROUP_REPORT_SETTINGS["message_format"]).strip()
+        lark_app_id = form.get("lark_app_id", "").strip()
+        lark_app_secret = form.get("lark_app_secret", "").strip()
+        if message_format not in GROUP_REPORT_MESSAGE_FORMATS:
+            raise ValueError("请选择有效的群测试报告发送格式。")
         if webhook_url and not webhook_url.startswith(("https://", "http://")):
             raise ValueError("群机器人 Webhook 地址格式不正确。")
         if len(send_time) != 5 or ":" not in send_time:
@@ -1269,16 +1333,33 @@ def create_app(test_config: dict | None = None) -> Flask:
                 raise ValueError("所选项目不存在。")
         if enabled and not webhook_url:
             raise ValueError("开启群测试报告通知前，请先填写群机器人 Webhook。")
+        if enabled and message_format == "image" and (not lark_app_id or not lark_app_secret):
+            raise ValueError("选择图片消息时，请填写飞书应用 App ID 和 App Secret。")
         db = get_db()
         db.execute(
             """
             UPDATE mail_settings
             SET report_notify_enabled = ?, report_notify_webhook = ?, report_notify_secret = ?,
                 report_notify_send_time = ?, report_notify_project_id = ?, report_notify_version = ?,
-                report_notify_base_url = ?
+                report_notify_base_url = ?, report_notify_manual_note = ?,
+                report_notify_tracking_progress = ?, report_notify_message_format = ?,
+                report_notify_lark_app_id = ?, report_notify_lark_app_secret = ?
             WHERE id = 1
             """,
-            (enabled, webhook_url, secret, send_time, project_id, version, base_url),
+            (
+                enabled,
+                webhook_url,
+                secret,
+                send_time,
+                project_id,
+                version,
+                base_url,
+                manual_note,
+                tracking_progress,
+                message_format,
+                lark_app_id,
+                lark_app_secret,
+            ),
         )
         db.commit()
 
@@ -1574,6 +1655,11 @@ def create_app(test_config: dict | None = None) -> Flask:
         base_url = (base_url.strip() or request.host_url or "").rstrip("/")
         return f"{base_url}{url_for('bug_detail', bug_id=bug_id)}" if base_url else url_for("bug_detail", bug_id=bug_id)
 
+    def build_app_absolute_url(endpoint: str, base_url: str = "", **values: object) -> str:
+        base = (base_url.strip() or request.host_url or "").rstrip("/")
+        path = url_for(endpoint, **values)
+        return f"{base}{path}" if base else path
+
     def build_severe_bug_assignment_email_html(
         assignee_user: sqlite3.Row,
         bug: sqlite3.Row,
@@ -1776,6 +1862,110 @@ def create_app(test_config: dict | None = None) -> Flask:
         lines.extend(["", f"发送时间：{current_time()}"])
         return "\n".join(lines)
 
+    def compact_card_text(value: object, default: str = "-") -> str:
+        text = str(value or "").strip()
+        return re.sub(r"\s+", " ", text) if text else default
+
+    def clipped_card_text(value: object, limit: int = 180, default: str = "-") -> str:
+        text = compact_card_text(value, default=default)
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit].rstrip()}..."
+
+    def build_new_bug_group_card_payload(
+        bug: sqlite3.Row,
+        operator_name: str,
+        bug_url: str,
+        base_url: str = "",
+        secret: str = "",
+    ) -> bytes:
+        status_label = STATUS_LABELS.get(str(bug["status"] or ""), str(bug["status"] or "-"))
+        requirement_label = compact_card_text(bug["requirement_title"] or bug["requirement_code"] or bug["version"])
+        fields = [
+            ("Bug ID", format_bug_no(bug["bug_no"] or bug["id"])),
+            ("项目", bug["project_name"]),
+            ("需求", requirement_label),
+            ("端", bug["platform"]),
+            ("状态", status_label),
+            ("优先级", bug["priority"]),
+            ("严重程度", bug["severity"]),
+            ("负责人", bug["assignee_name"]),
+            ("提交人", bug["creator_name"] or operator_name),
+        ]
+        actions: list[dict[str, object]] = []
+        if bug_url:
+            actions.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "查看 Bug 详情"},
+                    "type": "primary",
+                    "url": bug_url,
+                }
+            )
+        if bug["requirement_id"]:
+            actions.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "进入需求页"},
+                    "type": "default",
+                    "url": build_app_absolute_url(
+                        "requirement_detail",
+                        base_url,
+                        requirement_id=int(bug["requirement_id"]),
+                    ),
+                }
+            )
+        actions.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "AI处理"},
+                "type": "default",
+                "url": build_app_absolute_url("bug_detail", base_url, bug_id=int(bug["id"]), tab="process"),
+            }
+        )
+        payload: dict[str, object] = {
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "template": "red",
+                    "title": {"tag": "plain_text", "content": "新建 Bug"},
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"**{clipped_card_text(bug['title'], limit=90)}**",
+                        },
+                    },
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": clipped_card_text(bug["description"], limit=160),
+                        },
+                    },
+                    {
+                        "tag": "div",
+                        "fields": [
+                            {
+                                "is_short": False,
+                                "text": {
+                                    "tag": "lark_md",
+                                    "content": f"**{label}：** {compact_card_text(value)}",
+                                },
+                            }
+                            for label, value in fields
+                        ],
+                    },
+                    {"tag": "hr"},
+                    {"tag": "action", "actions": actions},
+                ],
+            },
+        }
+        return build_group_robot_payload(payload, secret=secret)
+
     def maybe_send_new_bug_group_notification(
         bug_id: int,
         operator_name: str,
@@ -1817,11 +2007,18 @@ def create_app(test_config: dict | None = None) -> Flask:
             operator_name=operator_name,
             bug_url=bug_url,
         )
+        request_body = build_new_bug_group_card_payload(
+            bug=bug,
+            operator_name=operator_name,
+            bug_url=bug_url,
+            base_url=str(project["bug_notify_base_url"] or ""),
+            secret=secret,
+        )
         try:
             send_group_report_message(
                 webhook_url=webhook_url,
                 message_text=message_text,
-                secret=secret,
+                request_body=request_body,
             )
         except Exception as exc:
             result_text = f"新建 Bug 群通知发送失败：{exc}"
@@ -1849,6 +2046,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         open_bug_platform_counts: list[dict[str, object]] | None = None,
         base_url: str = "",
         manual_note: str = "",
+        tracking_progress: str = "",
     ) -> str:
         not_run_count = next((item["count"] for item in distribution if item["status"] == "未测"), 0)
         executed_count = max(case_total - not_run_count, 0)
@@ -1856,10 +2054,20 @@ def create_app(test_config: dict | None = None) -> Flask:
         fixed_bug_count = int(summary["verification_count"]) + int(summary["closed_count"])
         reopened_or_open_count = int(summary["active_count"])
         project_label = project["name"] if not version else f"{project['name']}{version}"
-        normalized_manual_note = "\n".join(
-            line.strip() for line in str(manual_note or "").splitlines() if line.strip()
-        )
+        manual_note_lines = [line.strip() for line in str(manual_note or "").splitlines() if line.strip()]
+        tracking_progress_lines = [line.strip() for line in str(tracking_progress or "").splitlines() if line.strip()]
         open_bug_platform_counts = open_bug_platform_counts or []
+        risk_bug_lines = [
+            (
+                f"  - {format_bug_no(item['bug_no'] or item['id'])} | "
+                f"{item['title'] or '-'} | "
+                f"{STATUS_LABELS.get(str(item['status'] or ''), str(item['status'] or '-'))} | "
+                f"{item['assignee_name'] or '未分配'}"
+            )
+            for item in risk_bugs[:5]
+        ]
+        if len(risk_bugs) > 5:
+            risk_bug_lines.append(f"  - 还有 {len(risk_bugs) - 5} 个严重 Bug 未展示")
         lines = [
             f"测试项目：{project_label}",
             f"• 整体测试进度：{progress_percent}",
@@ -1872,18 +2080,817 @@ def create_app(test_config: dict | None = None) -> Flask:
         ]
         for item in open_bug_platform_counts:
             lines.append(f"  {item['label']}：{item['count']}")
-        lines.append("• 今日风险/备注：")
-        if normalized_manual_note:
-            lines.extend(normalized_manual_note.splitlines())
+        lines.append(f"• 严重 Bug 汇总：{len(risk_bugs)} 个待处理")
+        lines.extend(risk_bug_lines or ["  - 暂无未关闭严重 Bug"])
+        if manual_note_lines:
+            lines.append("• 风险备注：")
+            lines.extend(f"  - {line}" for line in manual_note_lines)
+        if tracking_progress_lines:
+            lines.append(f"• 埋点进度：{'；'.join(tracking_progress_lines)}")
         return "\n".join(lines)
 
-    def build_group_report_payload(message_text: str, secret: str = "") -> bytes:
+    def report_percent(value: float) -> str:
+        rounded = round(value)
+        return f"{rounded}%" if abs(value - rounded) < 0.05 else f"{value:.1f}%"
+
+    def build_group_report_card_payload(
+        project: sqlite3.Row,
+        version: str,
+        summary: dict,
+        case_total: int,
+        distribution: list[dict],
+        risk_bugs: list[sqlite3.Row],
+        generated_at: str,
+        open_bug_platform_counts: list[dict[str, object]] | None = None,
+        manual_note: str = "",
+        tracking_progress: str = "",
+        secret: str = "",
+    ) -> bytes:
+        not_run_count = next((int(item["count"]) for item in distribution if item["status"] == "未测"), 0)
+        executed_count = max(case_total - not_run_count, 0)
+        progress_value = 0.0 if case_total <= 0 else (executed_count / case_total) * 100
+        headline_progress_percent = "0%" if case_total <= 0 else f"{round(progress_value)}%"
+        fixed_bug_count = int(summary["verification_count"]) + int(summary["closed_count"])
+        active_count = int(summary["active_count"])
+        total_bug_count = int(summary["total"])
+        fix_rate_value = 0.0 if total_bug_count <= 0 else (fixed_bug_count / total_bug_count) * 100
+        fix_rate = report_percent(fix_rate_value)
+        closed_count = int(summary["closed_count"])
+        project_label = project["name"] if not version else f"{project['name']} {version}"
+        generated_date = generated_at.split(" ", 1)[0].replace("-", ".")
+        open_bug_platform_counts = open_bug_platform_counts or []
+        platform_text = "；".join(
+            f"{item['label']} {item['count']}" for item in open_bug_platform_counts
+        )
+        risk_level = "低风险" if active_count == 0 and not risk_bugs else "有风险"
+        clear_label = "缺陷清零" if active_count == 0 else f"{active_count} 个打开缺陷"
+        if active_count == 0:
+            conclusion = (
+                f"测试整体完成度 {headline_progress_percent}，当前无阻塞缺陷；"
+                f"剩余 {not_run_count} 条用例建议在发版前完成收尾执行与冒烟复核。"
+            )
+        else:
+            conclusion = (
+                f"测试整体完成度 {headline_progress_percent}，仍有 {active_count} 个打开缺陷待处理"
+                + (f"（{platform_text}）" if platform_text else "")
+                + f"；剩余 {not_run_count} 条用例待执行。"
+            )
+        manual_note_lines = [line.strip() for line in str(manual_note or "").splitlines() if line.strip()]
+        tracking_progress_lines = [line.strip() for line in str(tracking_progress or "").splitlines() if line.strip()]
+        note_lines: list[str]
+        if risk_bugs:
+            note_lines = [f"**严重 Bug 汇总：{len(risk_bugs)} 个待处理**"]
+            note_lines.extend(
+                (
+                    f"- {format_bug_no(item['bug_no'] or item['id'])} "
+                    f"{item['title'] or '-'}"
+                    f"（{STATUS_LABELS.get(str(item['status'] or ''), str(item['status'] or '-'))} / "
+                    f"{item['assignee_name'] or '未分配'}）"
+                )
+                for item in risk_bugs[:5]
+            )
+            if len(risk_bugs) > 5:
+                note_lines.append(f"- 还有 {len(risk_bugs) - 5} 个严重 Bug 未展示")
+        else:
+            note_lines = ["**严重 Bug 汇总：0 个待处理**"]
+            if not manual_note_lines:
+                note_lines.append("- 暂无未关闭严重 Bug")
+        if manual_note_lines:
+            note_lines.append("**风险备注**")
+            note_lines.extend(f"- {line}" for line in manual_note_lines)
+        tracking_progress_text = "；".join(tracking_progress_lines)
+        metrics = [
+            ("总", "整体进度", headline_progress_percent, ""),
+            ("例", "用例执行", f"{executed_count} / {case_total}", f"剩余 {not_run_count} 条待执行"),
+            ("修", "缺陷修复", f"{fixed_bug_count} / {total_bug_count}", f"修复率 {fix_rate}"),
+            ("开", "打开缺陷", str(active_count), "当前无阻塞缺陷" if active_count == 0 else "需要继续跟进"),
+        ]
+        metric_tag_colors = ["turquoise", "blue", "orange", "red"]
+        chain_items = [
+            ("发现", str(total_bug_count), "累计提交", "blue-600"),
+            ("修复", str(fixed_bug_count), "全部完成" if active_count == 0 else "处理中", "orange-600"),
+            ("回归", str(closed_count), "验证通过", "turquoise-600"),
+            ("打开", str(active_count), "无遗留" if active_count == 0 else "待处理", "grey-600"),
+        ]
+        risk_tag_text = f"严重 {len(risk_bugs)}"
+        risk_tag_markdown_color = "orange" if risk_bugs else "green"
+
+        def div_text(
+            content: str,
+            text_size: str = "normal",
+            text_color: str = "grey-1000",
+            text_align: str = "left",
+            tag: str = "plain_text",
+            margin: str = "0px",
+        ) -> dict[str, object]:
+            return {
+                "tag": "div",
+                "margin": margin,
+                "text": {
+                    "tag": tag,
+                    "content": content,
+                    "text_size": text_size,
+                    "text_color": text_color,
+                    "text_align": text_align,
+                },
+            }
+
+        def container(
+            elements: list[dict[str, object]],
+            background_style: str = "default",
+            padding: str = "10px",
+            corner_radius: str = "6px",
+            has_border: bool = False,
+            border_color: str = "grey-300",
+            direction: str = "vertical",
+            width: str = "fill",
+            height: str = "auto",
+            horizontal_align: str = "left",
+            vertical_align: str = "top",
+            horizontal_spacing: str = "6px",
+            vertical_spacing: str = "6px",
+            margin: str = "0px",
+        ) -> dict[str, object]:
+            data: dict[str, object] = {
+                "tag": "interactive_container",
+                "width": width,
+                "height": height,
+                "direction": direction,
+                "horizontal_align": horizontal_align,
+                "vertical_align": vertical_align,
+                "horizontal_spacing": horizontal_spacing,
+                "vertical_spacing": vertical_spacing,
+                "background_style": background_style,
+                "corner_radius": corner_radius,
+                "padding": padding,
+                "margin": margin,
+                "behaviors": [],
+                "elements": elements,
+            }
+            if has_border:
+                data["has_border"] = True
+                data["border_color"] = border_color
+            return data
+
+        def column(
+            elements: list[dict[str, object]],
+            weight: int = 1,
+            width: str = "weighted",
+            padding: str = "0px",
+            background_style: str = "default",
+            horizontal_align: str = "left",
+            vertical_align: str = "top",
+            vertical_spacing: str = "6px",
+        ) -> dict[str, object]:
+            return {
+                "tag": "column",
+                "width": width,
+                "weight": weight,
+                "padding": padding,
+                "background_style": background_style,
+                "horizontal_align": horizontal_align,
+                "vertical_align": vertical_align,
+                "vertical_spacing": vertical_spacing,
+                "elements": elements,
+            }
+
+        def column_set(
+            columns: list[dict[str, object]],
+            flex_mode: str = "flow",
+            horizontal_spacing: str = "10px",
+            margin: str = "0px",
+            horizontal_align: str = "left",
+        ) -> dict[str, object]:
+            return {
+                "tag": "column_set",
+                "flex_mode": flex_mode,
+                "horizontal_spacing": horizontal_spacing,
+                "horizontal_align": horizontal_align,
+                "margin": margin,
+                "columns": columns,
+            }
+
+        def metric_card(icon: str, title: str, value: str, sub_text: str, tag_color: str) -> dict[str, object]:
+            elements = [
+                div_text(
+                    f"<text_tag color='{tag_color}'>{icon}</text_tag> {title}",
+                    text_size="normal",
+                    text_color="grey-600",
+                    tag="lark_md",
+                ),
+                div_text(value, text_size="heading-2", text_color="grey-1000", margin="4px 0px 0px 0px"),
+            ]
+            if sub_text:
+                elements.append(div_text(sub_text, text_size="notation", text_color="grey-600"))
+            return container(
+                elements,
+                background_style="bg-white",
+                padding="12px",
+                corner_radius="6px",
+                has_border=True,
+                border_color="grey-300",
+                vertical_spacing="4px",
+            )
+
+        def chain_node(label: str, value: str, sub_text: str, text_color: str) -> dict[str, object]:
+            return column(
+                [
+                    div_text(value, text_size="heading", text_color=text_color, text_align="center"),
+                    div_text(label, text_size="normal", text_color="grey-1000", text_align="center"),
+                    div_text(sub_text, text_size="notation", text_color="grey-600", text_align="center"),
+                ],
+                weight=1,
+                horizontal_align="center",
+                vertical_spacing="2px",
+            )
+
+        metric_columns = [
+            column([metric_card(icon, title, value, sub_text, tag_color)], weight=1)
+            for (icon, title, value, sub_text), tag_color in zip(metrics, metric_tag_colors)
+        ]
+        chain_columns = [chain_node(label, value, sub_text, text_color) for label, value, sub_text, text_color in chain_items]
+        note_text = "\n".join(note_lines)
+        elements = [
+            container(
+                [
+                    container(
+                        [
+                            div_text(
+                                "QA",
+                                text_size="normal",
+                                text_color="grey-00",
+                                text_align="center",
+                            )
+                        ],
+                        background_style="turquoise-600",
+                        padding="0px",
+                        corner_radius="6px",
+                        width="34px",
+                        height="34px",
+                        horizontal_align="center",
+                        vertical_align="center",
+                    ),
+                    column_set(
+                        [
+                            column(
+                                [
+                                    div_text("测试日报", text_size="heading-2", text_color="grey-00"),
+                                    div_text(
+                                        f"{project_label} · 发布前收尾验证",
+                                        text_size="notation",
+                                        text_color="grey-350",
+                                    ),
+                                ],
+                                weight=3,
+                                vertical_align="center",
+                                vertical_spacing="0px",
+                            ),
+                            column(
+                                [
+                                    div_text(
+                                        (
+                                            f"<text_tag color='green'>{risk_level}</text_tag> "
+                                            f"<text_tag color='yellow'>{clear_label}</text_tag>"
+                                        ),
+                                        text_size="normal",
+                                        text_color="grey-00",
+                                        text_align="right",
+                                        tag="lark_md",
+                                    ),
+                                    div_text(
+                                        generated_date,
+                                        text_size="normal",
+                                        text_color="grey-350",
+                                        text_align="right",
+                                    ),
+                                ],
+                                weight=2,
+                                horizontal_align="right",
+                                vertical_align="center",
+                            ),
+                        ],
+                        flex_mode="flow",
+                        horizontal_spacing="12px",
+                    ),
+                ],
+                background_style="indigo-900",
+                padding="12px 18px 12px 18px",
+                corner_radius="0px",
+                direction="horizontal",
+                horizontal_spacing="10px",
+                vertical_align="center",
+            ),
+            container(
+                [
+                    column_set(
+                        [
+                            column(
+                                [div_text("今日结论", text_size="normal", text_color="turquoise-600")],
+                                width="82px",
+                                vertical_align="center",
+                            ),
+                            column(
+                                [div_text(conclusion, text_size="normal", text_color="grey-1000")],
+                                weight=1,
+                                vertical_align="center",
+                            ),
+                        ],
+                        flex_mode="flow",
+                        horizontal_spacing="10px",
+                    )
+                ],
+                background_style="turquoise-50",
+                padding="10px 14px 10px 14px",
+                margin="10px 16px 0px 16px",
+                corner_radius="6px",
+                has_border=True,
+                border_color="turquoise-200",
+            ),
+            column_set(metric_columns, flex_mode="bisect", horizontal_spacing="10px", margin="6px 16px 0px 16px"),
+            container(
+                [
+                    div_text("缺陷闭环", text_size="heading", text_color="grey-1000"),
+                    div_text(
+                        "发现 · 修复 · 回归 · 打开缺陷状态一屏看清",
+                        text_size="notation",
+                        text_color="grey-600",
+                    ),
+                    column_set(chain_columns, flex_mode="bisect", horizontal_spacing="6px", margin="0px"),
+                    div_text(
+                        f"发现 {total_bug_count} → 修复 {fixed_bug_count} → 回归 {closed_count} → 打开 {active_count}",
+                        text_size="notation",
+                        text_color="grey-600",
+                        text_align="center",
+                    ),
+                ],
+                background_style="bg-white",
+                padding="14px",
+                corner_radius="6px",
+                has_border=True,
+                border_color="grey-300",
+                vertical_spacing="4px",
+                margin="0px 16px 0px 16px",
+            ),
+            container(
+                [
+                    div_text("严重 Bug / 风险备注", text_size="heading", text_color="grey-1000"),
+                    column_set(
+                        [
+                            column(
+                                [
+                                    div_text(
+                                        f"<text_tag color='{risk_tag_markdown_color}'>{risk_tag_text}</text_tag>",
+                                        text_size="normal",
+                                        text_color="turquoise-600",
+                                        tag="lark_md",
+                                    )
+                                ],
+                                width="74px",
+                                vertical_align="top",
+                            ),
+                            column(
+                                [
+                                    div_text(
+                                        note_text,
+                                        text_size="normal",
+                                        text_color="grey-1000",
+                                        tag="lark_md",
+                                    )
+                                ],
+                                weight=1,
+                                vertical_align="center",
+                            ),
+                        ],
+                        flex_mode="flow",
+                        horizontal_spacing="8px",
+                    ),
+                ],
+                background_style="bg-white",
+                padding="14px",
+                corner_radius="6px",
+                has_border=True,
+                border_color="grey-300",
+                vertical_spacing="5px",
+                margin="0px 16px 0px 16px",
+            ),
+        ]
+        if tracking_progress_lines:
+            elements.append(
+                container(
+                    [
+                        div_text(
+                            f"埋点进度：{tracking_progress_text}",
+                            text_size="heading",
+                            text_color="grey-1000",
+                            tag="lark_md",
+                        ),
+                    ],
+                    background_style="bg-white",
+                    padding="14px",
+                    corner_radius="6px",
+                    has_border=True,
+                    border_color="grey-300",
+                    vertical_spacing="5px",
+                    margin="0px 16px 0px 16px",
+                )
+            )
+        elements.append(
+            column_set(
+                [
+                    column(
+                        [
+                            div_text(
+                                "建议日报结构：结论先行 / 关键指标 / 缺陷闭环 / 风险备注",
+                                text_size="notation",
+                                text_color="grey-600",
+                            )
+                        ],
+                        weight=1,
+                    ),
+                    column(
+                        [
+                            div_text(
+                                "QA Daily Report",
+                                text_size="notation",
+                                text_color="grey-600",
+                                text_align="right",
+                            )
+                        ],
+                        weight=1,
+                    ),
+                ],
+                flex_mode="flow",
+                margin="0px 16px 0px 16px",
+            )
+        )
+
         payload: dict[str, object] = {
-            "msg_type": "text",
-            "content": {
-                "text": message_text,
+            "msg_type": "interactive",
+            "card": {
+                "schema": "2.0",
+                "config": {
+                    "update_multi": True,
+                    "summary": {"content": "QA 测试日报"},
+                },
+                "body": {
+                    "direction": "vertical",
+                    "padding": "0px 0px 6px 0px",
+                    "vertical_spacing": "8px",
+                    "elements": elements,
+                },
             },
         }
+        return build_group_robot_payload(payload, secret=secret)
+
+    def load_report_image_font(size: int, bold: bool = False):
+        from PIL import ImageFont
+
+        font_candidates = [
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        ]
+        if bold:
+            font_candidates = [
+                "/System/Library/Fonts/PingFang.ttc",
+                "/System/Library/Fonts/STHeiti Medium.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                *font_candidates,
+            ]
+        for font_path in font_candidates:
+            path = Path(font_path)
+            if not path.exists():
+                continue
+            try:
+                return ImageFont.truetype(str(path), size=size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    def report_image_text_width(draw, text: str, font) -> float:
+        try:
+            return float(draw.textlength(text, font=font))
+        except Exception:
+            bbox = draw.textbbox((0, 0), text, font=font)
+            return float(bbox[2] - bbox[0])
+
+    def wrap_report_image_text(
+        draw,
+        text: object,
+        font,
+        max_width: int,
+        max_lines: int | None = None,
+    ) -> list[str]:
+        lines: list[str] = []
+        paragraphs = str(text or "").replace("\r\n", "\n").splitlines() or [""]
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
+                lines.append("")
+                continue
+            current = ""
+            tokens = re.findall(r"[A-Za-z0-9%._:/+-]+|[ \t]+|.", paragraph)
+            for token in tokens:
+                if token.isspace() and not current:
+                    continue
+                candidate = f"{current}{token}"
+                if not current or report_image_text_width(draw, candidate, font) <= max_width:
+                    current = candidate
+                else:
+                    lines.append(current.rstrip())
+                    current = token.lstrip()
+                    while current and report_image_text_width(draw, current, font) > max_width:
+                        clipped = ""
+                        for char in current:
+                            char_candidate = f"{clipped}{char}"
+                            if not clipped or report_image_text_width(draw, char_candidate, font) <= max_width:
+                                clipped = char_candidate
+                            else:
+                                break
+                        lines.append(clipped)
+                        current = current[len(clipped) :]
+            if current:
+                lines.append(current.rstrip())
+        if max_lines is not None and len(lines) > max_lines:
+            clipped = lines[:max_lines]
+            last_line = clipped[-1].rstrip()
+            while last_line and report_image_text_width(draw, f"{last_line}...", font) > max_width:
+                last_line = last_line[:-1].rstrip()
+            clipped[-1] = f"{last_line}..." if last_line else "..."
+            return clipped
+        return lines
+
+    def draw_report_image_lines(
+        draw,
+        lines: list[str],
+        x: int,
+        y: int,
+        font,
+        fill: str,
+        line_height: int,
+    ) -> int:
+        for line in lines:
+            draw.text((x, y), line, font=font, fill=fill)
+            y += line_height
+        return y
+
+    def build_group_report_image_bytes(
+        project: sqlite3.Row,
+        version: str,
+        summary: dict,
+        case_total: int,
+        distribution: list[dict],
+        risk_bugs: list[sqlite3.Row],
+        generated_at: str,
+        open_bug_platform_counts: list[dict[str, object]] | None = None,
+        manual_note: str = "",
+        tracking_progress: str = "",
+    ) -> bytes:
+        from PIL import Image, ImageDraw
+
+        width = 820
+        max_height = 2600
+        outer_margin = 24
+        content_margin = 42
+        card_width = width - outer_margin * 2
+        content_width = width - content_margin * 2
+        image = Image.new("RGB", (width, max_height), "#f3f6fb")
+        draw = ImageDraw.Draw(image)
+
+        font_title = load_report_image_font(34, bold=True)
+        font_heading = load_report_image_font(24, bold=True)
+        font_body = load_report_image_font(21)
+        font_body_bold = load_report_image_font(21, bold=True)
+        font_small = load_report_image_font(17)
+        font_metric = load_report_image_font(31, bold=True)
+        font_qa = load_report_image_font(22, bold=True)
+
+        not_run_count = next((int(item["count"]) for item in distribution if item["status"] == "未测"), 0)
+        executed_count = max(case_total - not_run_count, 0)
+        progress_value = 0.0 if case_total <= 0 else (executed_count / case_total) * 100
+        headline_progress_percent = "0%" if case_total <= 0 else f"{round(progress_value)}%"
+        fixed_bug_count = int(summary["verification_count"]) + int(summary["closed_count"])
+        active_count = int(summary["active_count"])
+        total_bug_count = int(summary["total"])
+        closed_count = int(summary["closed_count"])
+        fix_rate_value = 0.0 if total_bug_count <= 0 else (fixed_bug_count / total_bug_count) * 100
+        fix_rate = report_percent(fix_rate_value)
+        project_label = project["name"] if not version else f"{project['name']} {version}"
+        generated_date = generated_at.split(" ", 1)[0].replace("-", ".")
+        open_bug_platform_counts = open_bug_platform_counts or []
+        platform_text = "；".join(f"{item['label']} {item['count']}" for item in open_bug_platform_counts)
+        risk_level = "低风险" if active_count == 0 and not risk_bugs else "有风险"
+        clear_label = "缺陷清零" if active_count == 0 else f"{active_count} 个打开缺陷"
+        if active_count == 0:
+            conclusion = (
+                f"测试整体完成度 {headline_progress_percent}，当前无阻塞缺陷；"
+                f"剩余 {not_run_count} 条用例建议在发版前完成收尾执行与冒烟复核。"
+            )
+        else:
+            conclusion = (
+                f"测试整体完成度 {headline_progress_percent}，仍有 {active_count} 个打开缺陷待处理"
+                + (f"（{platform_text}）" if platform_text else "")
+                + f"；剩余 {not_run_count} 条用例待执行。"
+            )
+        manual_note_lines = [line.strip() for line in str(manual_note or "").splitlines() if line.strip()]
+        tracking_progress_lines = [line.strip() for line in str(tracking_progress or "").splitlines() if line.strip()]
+        tracking_progress_text = "；".join(tracking_progress_lines)
+
+        def rounded_box(x1: int, y1: int, x2: int, y2: int, fill: str, outline: str | None = None, radius: int = 14) -> None:
+            draw.rounded_rectangle((x1, y1, x2, y2), radius=radius, fill=fill, outline=outline, width=1)
+
+        def badge(x: int, y: int, text: str, fill: str, text_fill: str) -> int:
+            padding_x = 13
+            badge_width = int(report_image_text_width(draw, text, font_small)) + padding_x * 2
+            rounded_box(x, y, x + badge_width, y + 28, fill, radius=14)
+            draw.text((x + padding_x, y + 5), text, font=font_small, fill=text_fill)
+            return x + badge_width + 8
+
+        y = 24
+        rounded_box(outer_margin, y, width - outer_margin, y + 148, "#17233f", radius=18)
+        rounded_box(content_margin, y + 34, content_margin + 50, y + 84, "#14b8a6", radius=8)
+        draw.text((content_margin + 12, y + 47), "QA", font=font_qa, fill="#ffffff")
+        draw.text((content_margin + 68, y + 32), "测试日报", font=font_title, fill="#ffffff")
+        draw.text((content_margin + 68, y + 80), f"{project_label} · 发布前收尾验证", font=font_body, fill="#cbd5e1")
+        tag_x = badge(width - content_margin - 188, y + 36, risk_level, "#dcfce7" if risk_level == "低风险" else "#fef3c7", "#166534" if risk_level == "低风险" else "#92400e")
+        badge(tag_x, y + 36, clear_label, "#e0f2fe", "#075985")
+        draw.text((width - content_margin - 100, y + 80), generated_date, font=font_small, fill="#cbd5e1")
+        y += 174
+
+        conclusion_lines = wrap_report_image_text(draw, conclusion, font_body, content_width - 136, max_lines=3)
+        conclusion_height = max(78, 28 + len(conclusion_lines) * 29)
+        rounded_box(outer_margin, y, width - outer_margin, y + conclusion_height, "#dff7f2", "#99e6d8", radius=14)
+        draw.text((content_margin, y + 24), "今日结论", font=font_body_bold, fill="#0f766e")
+        draw_report_image_lines(draw, conclusion_lines, content_margin + 112, y + 22, font_body, "#1f2937", 29)
+        y += conclusion_height + 16
+
+        metrics = [
+            ("整体进度", headline_progress_percent, "", "#0f766e"),
+            ("用例执行", f"{executed_count} / {case_total}", f"剩余 {not_run_count} 条待执行", "#2563eb"),
+            ("缺陷修复", f"{fixed_bug_count} / {total_bug_count}", f"修复率 {fix_rate}", "#ea580c"),
+            ("打开缺陷", str(active_count), "当前无阻塞缺陷" if active_count == 0 else "需要继续跟进", "#dc2626"),
+        ]
+        metric_gap = 14
+        metric_w = (card_width - content_margin + outer_margin - metric_gap) // 2
+        metric_h = 112
+        for index, (title, value, sub_text, color) in enumerate(metrics):
+            row = index // 2
+            col = index % 2
+            x1 = outer_margin + col * (metric_w + metric_gap)
+            y1 = y + row * (metric_h + metric_gap)
+            rounded_box(x1, y1, x1 + metric_w, y1 + metric_h, "#ffffff", "#d8dee9", radius=14)
+            draw.text((x1 + 18, y1 + 16), title, font=font_small, fill="#64748b")
+            draw.text((x1 + 18, y1 + 42), value, font=font_metric, fill=color)
+            if sub_text:
+                draw.text((x1 + 18, y1 + 82), sub_text, font=font_small, fill="#64748b")
+        y += metric_h * 2 + metric_gap + 18
+
+        rounded_box(outer_margin, y, width - outer_margin, y + 132, "#ffffff", "#d8dee9", radius=14)
+        draw.text((content_margin, y + 18), "缺陷闭环", font=font_heading, fill="#111827")
+        chain_labels = [
+            ("发现", str(total_bug_count), "累计提交", "#2563eb"),
+            ("修复", str(fixed_bug_count), "全部完成" if active_count == 0 else "处理中", "#ea580c"),
+            ("回归", str(closed_count), "验证通过", "#0f766e"),
+            ("打开", str(active_count), "无遗留" if active_count == 0 else "待处理", "#64748b"),
+        ]
+        node_w = content_width // 4
+        for index, (label, value, sub_text, color) in enumerate(chain_labels):
+            cx = content_margin + index * node_w + node_w // 2
+            draw.text((cx - report_image_text_width(draw, value, font_heading) / 2, y + 52), value, font=font_heading, fill=color)
+            draw.text((cx - report_image_text_width(draw, label, font_small) / 2, y + 82), label, font=font_small, fill="#111827")
+            draw.text((cx - report_image_text_width(draw, sub_text, font_small) / 2, y + 104), sub_text, font=font_small, fill="#64748b")
+        y += 150
+
+        risk_lines = [f"严重 Bug 汇总：{len(risk_bugs)} 个待处理"]
+        risk_lines.extend(
+            (
+                f"{format_bug_no(item['bug_no'] or item['id'])} {item['title'] or '-'}"
+                f"（{STATUS_LABELS.get(str(item['status'] or ''), str(item['status'] or '-'))} / "
+                f"{item['assignee_name'] or '未分配'}）"
+            )
+            for item in risk_bugs[:5]
+        )
+        if len(risk_bugs) > 5:
+            risk_lines.append(f"还有 {len(risk_bugs) - 5} 个严重 Bug 未展示")
+        if not risk_bugs and not manual_note_lines:
+            risk_lines.append("暂无未关闭严重 Bug")
+        if manual_note_lines:
+            risk_lines.append("风险备注")
+            risk_lines.extend(manual_note_lines)
+
+        rendered_risk_lines: list[str] = []
+        for line in risk_lines:
+            rendered_risk_lines.extend(wrap_report_image_text(draw, line, font_body, content_width, max_lines=2))
+        risk_height = 60 + len(rendered_risk_lines) * 30
+        rounded_box(outer_margin, y, width - outer_margin, y + risk_height, "#ffffff", "#d8dee9", radius=14)
+        draw.text((content_margin, y + 18), "严重 Bug / 风险备注", font=font_heading, fill="#111827")
+        draw_report_image_lines(draw, rendered_risk_lines, content_margin, y + 54, font_body, "#1f2937", 30)
+        y += risk_height + 16
+
+        if tracking_progress_text:
+            tracking_line = f"埋点进度：{tracking_progress_text}"
+            tracking_lines = wrap_report_image_text(draw, tracking_line, font_body_bold, content_width, max_lines=2)
+            tracking_height = 34 + len(tracking_lines) * 32
+            rounded_box(outer_margin, y, width - outer_margin, y + tracking_height, "#ffffff", "#d8dee9", radius=14)
+            draw_report_image_lines(draw, tracking_lines, content_margin, y + 22, font_body_bold, "#111827", 32)
+            y += tracking_height + 16
+
+        footer = "QA Daily Report · 固定图片版式"
+        draw.text((content_margin, y + 8), footer, font=font_small, fill="#64748b")
+        final_height = min(max_height, y + 48)
+        cropped = image.crop((0, 0, width, final_height))
+        stream = io.BytesIO()
+        cropped.save(stream, format="PNG", optimize=True)
+        return stream.getvalue()
+
+    def fetch_lark_tenant_access_token(app_id: str, app_secret: str) -> str:
+        if not app_id or not app_secret:
+            raise ValueError("图片消息需要先配置飞书应用 App ID 和 App Secret。")
+        request_body = json.dumps(
+            {"app_id": app_id, "app_secret": app_secret},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        http_request = urllib_request.Request(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            data=request_body,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "Content-Length": str(len(request_body)),
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(http_request, timeout=20) as response:
+                raw_body = response.read().decode("utf-8", errors="replace")
+        except urllib_error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise ValueError(f"获取飞书访问凭证失败：HTTP {exc.code} {detail}") from exc
+        except urllib_error.URLError as exc:
+            raise ValueError(f"获取飞书访问凭证失败：{exc.reason}") from exc
+        try:
+            payload = json.loads(raw_body or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"获取飞书访问凭证失败：响应不是 JSON：{raw_body}") from exc
+        if payload.get("code") not in (None, 0):
+            raise ValueError(f"获取飞书访问凭证失败：{payload.get('msg') or payload}")
+        token = str(payload.get("tenant_access_token") or "").strip()
+        if not token:
+            raise ValueError("获取飞书访问凭证失败：响应缺少 tenant_access_token。")
+        return token
+
+    def upload_lark_report_image(image_bytes: bytes, app_id: str, app_secret: str) -> str:
+        token = fetch_lark_tenant_access_token(app_id, app_secret)
+        boundary = f"----BugPlatformReport{uuid.uuid4().hex}"
+        body = b"".join(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                b'Content-Disposition: form-data; name="image_type"\r\n\r\n',
+                b"message\r\n",
+                f"--{boundary}\r\n".encode("utf-8"),
+                b'Content-Disposition: form-data; name="image"; filename="qa_daily_report.png"\r\n',
+                b"Content-Type: image/png\r\n\r\n",
+                image_bytes,
+                b"\r\n",
+                f"--{boundary}--\r\n".encode("utf-8"),
+            ]
+        )
+        http_request = urllib_request.Request(
+            "https://open.feishu.cn/open-apis/im/v1/images",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Content-Length": str(len(body)),
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(http_request, timeout=30) as response:
+                raw_body = response.read().decode("utf-8", errors="replace")
+        except urllib_error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise ValueError(f"上传日报图片失败：HTTP {exc.code} {detail}") from exc
+        except urllib_error.URLError as exc:
+            raise ValueError(f"上传日报图片失败：{exc.reason}") from exc
+        try:
+            payload = json.loads(raw_body or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"上传日报图片失败：响应不是 JSON：{raw_body}") from exc
+        if payload.get("code") not in (None, 0):
+            raise ValueError(f"上传日报图片失败：{payload.get('msg') or payload}")
+        image_key = str((payload.get("data") or {}).get("image_key") or "").strip()
+        if not image_key:
+            raise ValueError("上传日报图片失败：响应缺少 image_key。")
+        return image_key
+
+    def build_group_robot_payload(payload: dict[str, object], secret: str = "") -> bytes:
         if secret:
             timestamp = str(int(time.time()))
             string_to_sign = f"{timestamp}\n{secret}"
@@ -1894,12 +2901,31 @@ def create_app(test_config: dict | None = None) -> Flask:
             payload["sign"] = sign
         return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
+    def build_group_report_payload(message_text: str, secret: str = "") -> bytes:
+        payload: dict[str, object] = {
+            "msg_type": "text",
+            "content": {
+                "text": message_text,
+            },
+        }
+        return build_group_robot_payload(payload, secret=secret)
+
+    def build_group_report_image_payload(image_key: str, secret: str = "") -> bytes:
+        payload: dict[str, object] = {
+            "msg_type": "image",
+            "content": {
+                "image_key": image_key,
+            },
+        }
+        return build_group_robot_payload(payload, secret=secret)
+
     def send_group_report_message(
         webhook_url: str,
         message_text: str,
         secret: str = "",
+        request_body: bytes | None = None,
     ) -> dict[str, object]:
-        request_body = build_group_report_payload(message_text, secret=secret)
+        request_body = request_body or build_group_report_payload(message_text, secret=secret)
         http_request = urllib_request.Request(
             webhook_url,
             data=request_body,
@@ -1949,11 +2975,17 @@ def create_app(test_config: dict | None = None) -> Flask:
         if project is None:
             raise ValueError("所选项目不存在。")
         version = settings["version"].strip()
+        effective_manual_note = str(manual_note or "").strip() or settings["manual_note"].strip()
+        effective_tracking_progress = settings["tracking_progress"].strip()
+        message_format = settings["message_format"].strip() or DEFAULT_GROUP_REPORT_SETTINGS["message_format"]
+        if message_format not in GROUP_REPORT_MESSAGE_FORMATS:
+            message_format = DEFAULT_GROUP_REPORT_SETTINGS["message_format"]
         summary = fetch_summary(version=version, project_id=project_id)
         case_total = count_test_cases(version=version, project_id=project_id)
         distribution = execution_distribution(project_id=project_id, version=version)
         risk_bugs = fetch_report_risk_bugs(project_id=project_id, version=version)
         open_bug_platform_counts = fetch_open_bug_counts_by_platform(project_id=project_id, version=version)
+        generated_at = current_time()
         message_text = build_group_report_message(
             project=project,
             version=version,
@@ -1961,19 +2993,54 @@ def create_app(test_config: dict | None = None) -> Flask:
             case_total=case_total,
             distribution=distribution,
             risk_bugs=risk_bugs,
-            generated_at=current_time(),
+            generated_at=generated_at,
             open_bug_platform_counts=open_bug_platform_counts,
             base_url=settings["base_url"].strip(),
-            manual_note=manual_note,
+            manual_note=effective_manual_note,
+            tracking_progress=effective_tracking_progress,
         )
+        if message_format == "image":
+            image_bytes = build_group_report_image_bytes(
+                project=project,
+                version=version,
+                summary=summary,
+                case_total=case_total,
+                distribution=distribution,
+                risk_bugs=risk_bugs,
+                generated_at=generated_at,
+                open_bug_platform_counts=open_bug_platform_counts,
+                manual_note=effective_manual_note,
+                tracking_progress=effective_tracking_progress,
+            )
+            image_key = upload_lark_report_image(
+                image_bytes=image_bytes,
+                app_id=settings["lark_app_id"].strip(),
+                app_secret=settings["lark_app_secret"].strip(),
+            )
+            request_body = build_group_report_image_payload(image_key, secret=settings["secret"].strip())
+        else:
+            request_body = build_group_report_card_payload(
+                project=project,
+                version=version,
+                summary=summary,
+                case_total=case_total,
+                distribution=distribution,
+                risk_bugs=risk_bugs,
+                generated_at=generated_at,
+                open_bug_platform_counts=open_bug_platform_counts,
+                manual_note=effective_manual_note,
+                tracking_progress=effective_tracking_progress,
+                secret=settings["secret"].strip(),
+            )
         send_group_report_message(
             webhook_url=webhook_url,
             message_text=message_text,
-            secret=settings["secret"].strip(),
+            request_body=request_body,
         )
-        note_suffix = "（含手动备注）" if str(manual_note or "").strip() else ""
+        note_suffix = "（含补充信息）" if (effective_manual_note or effective_tracking_progress) else ""
+        format_label = GROUP_REPORT_MESSAGE_FORMATS.get(message_format, GROUP_REPORT_MESSAGE_FORMATS["card"])
         sent_at = update_group_report_run_result(
-            f"测试报告已发送到群：{project['name']} / {version or '全部版本'}{note_suffix}",
+            f"测试报告已发送到群：{project['name']} / {version or '全部版本'} / {format_label}{note_suffix}",
             mark_daily_sent=mark_daily_sent,
         )
         return project["name"], version or "全部版本", sent_at
@@ -3477,10 +4544,76 @@ def create_app(test_config: dict | None = None) -> Flask:
             params,
         ).fetchall()
 
+    def fetch_case_folders() -> list[sqlite3.Row]:
+        return get_db().execute(
+            """
+            SELECT *
+            FROM case_folders
+            WHERE project_id = ?
+            ORDER BY name ASC
+            """,
+            (current_project_id(),),
+        ).fetchall()
+
+    def create_case_folder(folder_name: str) -> bool:
+        name = folder_name.strip()
+        if not name:
+            return False
+        db = get_db()
+        existing = db.execute(
+            """
+            SELECT 1
+            FROM case_folders
+            WHERE project_id = ? AND name = ?
+            LIMIT 1
+            """,
+            (current_project_id(), name),
+        ).fetchone()
+        if existing:
+            return False
+        now = current_time()
+        db.execute(
+            """
+            INSERT INTO case_folders (project_id, name, creator_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                current_project_id(),
+                name,
+                int(g.current_user["id"]) if g.current_user is not None else None,
+                now,
+                now,
+            ),
+        )
+        db.commit()
+        return True
+
+    def ensure_case_folder(folder_name: str, db: sqlite3.Connection | None = None) -> None:
+        name = folder_name.strip() or "测试用例"
+        project_id = current_project_id()
+        if project_id is None:
+            return
+        target_db = db or get_db()
+        now = current_time()
+        target_db.execute(
+            """
+            INSERT OR IGNORE INTO case_folders (project_id, name, creator_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                name,
+                int(g.current_user["id"]) if g.current_user is not None else None,
+                now,
+                now,
+            ),
+        )
+
     def create_case_document(folder_name: str, doc_name: str) -> None:
         db = get_db()
         now = current_time()
         unique_case_no = f"DOC-{uuid.uuid4().hex[:8].upper()}"
+        ensure_case_folder(folder_name, db)
         db.execute(
             """
             INSERT INTO test_cases (
@@ -3520,6 +4653,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         if document is None:
             return 0
         db = get_db()
+        ensure_case_folder(folder_name, db)
         cursor = db.execute(
             """
             UPDATE test_cases
@@ -3587,6 +4721,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         if duplicate:
             return -1
         now = current_time()
+        ensure_case_folder(target_folder, db)
         cursor = db.execute(
             """
             UPDATE test_cases
@@ -3628,6 +4763,13 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     def delete_case_folder(folder_name: str) -> None:
         db = get_db()
+        db.execute(
+            """
+            DELETE FROM case_folders
+            WHERE project_id = ? AND name = ?
+            """,
+            (current_project_id(), folder_name),
+        )
         db.execute(
             """
             DELETE FROM test_cases
@@ -3875,12 +5017,14 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     def build_case_tree(documents: list[sqlite3.Row]) -> list[dict]:
         grouped: dict[str, list[sqlite3.Row]] = {}
+        folder_names = {row["name"] for row in fetch_case_folders()}
         for item in documents:
             folder_name = item["folder_name"] or "测试用例"
+            folder_names.add(folder_name)
             grouped.setdefault(folder_name, []).append(item)
         tree = []
-        for folder_name, items in grouped.items():
-            tree.append({"name": folder_name, "documents": items})
+        for folder_name in folder_names:
+            tree.append({"name": folder_name, "documents": grouped.get(folder_name, [])})
         tree.sort(key=lambda item: item["name"])
         return tree
 
@@ -5572,10 +6716,23 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.route("/cases/upload", methods=["POST"])
     def upload_cases() -> Response:
         version_filter = request.form.get("version_filter", "").strip()
+        folder_name = request.form.get("folder_name", "").strip()
+
+        def redirect_to_case_library() -> Response:
+            redirect_params: dict[str, object] = {}
+            if version_filter:
+                redirect_params["version"] = version_filter
+            if folder_name:
+                redirect_params["folder"] = folder_name
+            return redirect(url_for("case_library", **redirect_params))
+
         file = request.files.get("excel_file")
+        if not folder_name:
+            flash("请先选择上传文件夹。", "error")
+            return redirect_to_case_library()
         if file is None or not file.filename:
             flash("请选择 Excel 文件。", "error")
-            return redirect(url_for("case_library", version=version_filter) if version_filter else url_for("case_library"))
+            return redirect_to_case_library()
         workbook = openpyxl.load_workbook(file, data_only=True)
         db = get_db()
         project_id = current_project_id()
@@ -5583,13 +6740,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         imported = 0
         default_doc_name = Path(file.filename).stem
         default_version = default_doc_name.split("-")[0] if "-" in default_doc_name else ""
-        folder_name = "Excel导入"
         creator_id = int(g.current_user["id"]) if g.current_user is not None else None
         workbook_sheets = [sheet for sheet in workbook.worksheets if sheet.max_row > 0 and sheet.max_column > 0]
         multi_sheet_mode = len(workbook_sheets) > 1
         scanned_sheet_count = 0
         imported_sheet_names: list[str] = []
         imported_doc_names: list[str] = []
+        ensure_case_folder(folder_name, db)
 
         db.execute(
             """
@@ -5822,11 +6979,11 @@ def create_app(test_config: dict | None = None) -> Flask:
         if scanned_sheet_count == 0:
             flash("Excel 中没有可读取的工作表，无法导入。", "error")
             db.commit()
-            return redirect(url_for("case_library", version=version_filter) if version_filter else url_for("case_library"))
+            return redirect_to_case_library()
         if imported == 0:
             flash("未识别到可导入的用例数据，请检查各工作表表头中是否包含“用例编号”等核心字段。", "error")
             db.commit()
-            return redirect(url_for("case_library", version=version_filter) if version_filter else url_for("case_library"))
+            return redirect_to_case_library()
         repaired_count = repair_misaligned_excel_cases(db, imported_doc_names)
         db.commit()
         flash(
@@ -5834,7 +6991,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             + (f" 已自动修正 {repaired_count} 条错位数据。" if repaired_count > 0 else ""),
             "success",
         )
-        return redirect(url_for("case_library", version=version_filter) if version_filter else url_for("case_library"))
+        return redirect_to_case_library()
 
     @app.route("/cases/manage", methods=["POST"])
     def manage_case_library() -> Response:
@@ -5849,10 +7006,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             if not folder_name:
                 flash("请输入文件夹名称。", "error")
             else:
-                default_doc_name = f"{folder_name}-在线文档"
-                create_case_document(folder_name, default_doc_name)
+                created = create_case_folder(folder_name)
                 redirect_folder = folder_name
-                flash("文件夹已创建。", "success")
+                flash("文件夹已创建。" if created else "文件夹已存在。", "success" if created else "info")
         elif action == "create_document":
             if not doc_name:
                 flash("请输入在线文档名称。", "error")
@@ -6790,6 +7946,10 @@ def create_app(test_config: dict | None = None) -> Flask:
                 elif action == "send_test":
                     try:
                         manual_note = request.form.get("manual_note", "").strip()
+                        group_report_settings = fetch_group_report_settings()
+                        effective_manual_note = manual_note or group_report_settings["manual_note"].strip()
+                        effective_tracking_progress = group_report_settings["tracking_progress"].strip()
+                        message_format = group_report_settings["message_format"].strip() or DEFAULT_GROUP_REPORT_SETTINGS["message_format"]
                         project_name, version_name, _sent_at = send_testing_report_to_group(
                             force=True,
                             mark_daily_sent=False,
@@ -6798,8 +7958,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                     except Exception as exc:
                         flash(f"群测试报告发送失败：{exc}", "error")
                     else:
-                        note_suffix = "，已附带手动备注" if manual_note else ""
-                        flash(f"测试发送成功，已发送 {project_name} / {version_name} 测试报告到群{note_suffix}。", "success")
+                        note_suffix = "，已附带补充信息" if (effective_manual_note or effective_tracking_progress) else ""
+                        format_label = GROUP_REPORT_MESSAGE_FORMATS.get(message_format, GROUP_REPORT_MESSAGE_FORMATS["card"])
+                        flash(f"测试发送成功，已发送 {project_name} / {version_name} {format_label}测试报告到群{note_suffix}。", "success")
             return redirect(redirect_target)
         return render_template("admin.html", admin_cards=admin_dashboard_cards())
 

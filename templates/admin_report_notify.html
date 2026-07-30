@@ -35,6 +35,13 @@
                 <span>发送时间</span>
                 <input type="time" name="send_time" value="{{ report_notify_settings.send_time or '18:00' }}">
             </label>
+            <label>
+                <span>发送格式</span>
+                <select name="message_format">
+                    <option value="card" {% if report_notify_settings.message_format == 'card' %}selected{% endif %}>自适应卡片消息（无需 App ID，手机更稳）</option>
+                    <option value="image" {% if report_notify_settings.message_format == 'image' %}selected{% endif %}>飞书图片消息（固定图片版式）</option>
+                </select>
+            </label>
             <label class="full">
                 <span>群机器人 Webhook</span>
                 <input type="text" name="webhook_url" value="{{ report_notify_settings.webhook_url }}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
@@ -42,6 +49,14 @@
             <label class="full">
                 <span>机器人密钥（可选）</span>
                 <input type="text" name="secret" value="{{ report_notify_settings.secret }}" placeholder="如果群机器人开启加签，这里填写 secret">
+            </label>
+            <label>
+                <span>飞书 App ID</span>
+                <input type="text" name="lark_app_id" value="{{ report_notify_settings.lark_app_id }}" placeholder="直接展示图片需要">
+            </label>
+            <label>
+                <span>飞书 App Secret</span>
+                <input type="password" name="lark_app_secret" value="{{ report_notify_settings.lark_app_secret }}" placeholder="直接展示图片需要">
             </label>
             <label>
                 <span>发送项目</span>
@@ -63,7 +78,15 @@
             </label>
             <label class="full">
                 <span>平台地址（可选）</span>
-                <input type="text" name="base_url" value="{{ report_notify_settings.base_url }}" placeholder="例如 http://192.168.1.10:5050">
+                <input type="text" name="base_url" value="{{ report_notify_settings.base_url }}" placeholder="不填会自动识别，例如 http://192.168.1.10:5050">
+            </label>
+            <label class="full">
+                <span>定时发送备注（可选）</span>
+                <textarea name="manual_note" rows="5" placeholder="例如：支付链路还需补一次回归；提测包较晚，最终结论晚点同步。">{{ report_notify_settings.manual_note }}</textarea>
+            </label>
+            <label class="full">
+                <span>埋点进度（手动填写）</span>
+                <textarea name="tracking_progress" rows="2" placeholder="例如：60%">{{ report_notify_settings.tracking_progress }}</textarea>
             </label>
             <div class="admin-mail-meta full">
                 <span>上次发送时间：{{ report_notify_settings.last_sent_at or "暂无" }}</span>
@@ -79,16 +102,12 @@
             <input type="hidden" name="action" value="send_test">
             <input type="hidden" name="next" value="{{ url_for('admin_report_notify_page') }}">
             <h3>立即测试发送</h3>
-            <p class="field-tip">系统会按配置的项目与版本，每日固定时间自动向群里发送一份测试报告。这里可以先手动补充备注，再发一条验证机器人是否正常。</p>
+            <p class="field-tip">自适应卡片只需要群 Webhook；图片消息需要飞书应用凭证。</p>
             <div class="admin-mail-test-card">
                 <span>发送对象：当前配置的飞书 / Lark 群机器人</span>
-                <span>发送内容：Bug 汇总、用例执行分布、重点待处理 Bug</span>
+                <span>发送内容：Bug 汇总、用例执行分布、严重 Bug 风险汇总、风险备注、埋点进度</span>
                 <span>自动规则：每日 {{ report_notify_settings.send_time or "18:00" }} 发送 1 次</span>
             </div>
-            <label class="full">
-                <span>手动备注（可选）</span>
-                <textarea name="manual_note" rows="5" placeholder="例如：今天重点验证支付链路，提测包较晚，回归仍在进行中。"></textarea>
-            </label>
             <button class="btn btn-secondary mini" type="submit">立即发送测试报告</button>
         </form>
     </div>
