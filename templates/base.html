@@ -340,6 +340,48 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     });
 
+    function syncMultiFilterDropdown(dropdown) {
+        const labelNode = dropdown.querySelector("[data-filter-label]");
+        const placeholder = dropdown.dataset.filterPlaceholder || "筛选";
+        const checkedItems = Array.from(dropdown.querySelectorAll("[data-multi-filter-checkbox]:checked"));
+        const clearButton = dropdown.querySelector("[data-multi-filter-clear]");
+        dropdown.querySelectorAll(".multi-filter-option").forEach(function (option) {
+            const checkbox = option.querySelector("[data-multi-filter-checkbox]");
+            option.classList.toggle("active", Boolean(checkbox && checkbox.checked));
+        });
+        if (clearButton) {
+            clearButton.classList.toggle("active", checkedItems.length === 0);
+        }
+        if (!labelNode) {
+            return;
+        }
+        if (!checkedItems.length) {
+            labelNode.textContent = placeholder;
+        } else if (checkedItems.length === 1) {
+            labelNode.textContent = checkedItems[0].dataset.filterLabel || checkedItems[0].value;
+        } else {
+            labelNode.textContent = placeholder + "(" + checkedItems.length + ")";
+        }
+    }
+
+    document.querySelectorAll("[data-multi-filter-dropdown]").forEach(function (dropdown) {
+        syncMultiFilterDropdown(dropdown);
+        dropdown.querySelectorAll("[data-multi-filter-checkbox]").forEach(function (checkbox) {
+            checkbox.addEventListener("change", function () {
+                syncMultiFilterDropdown(dropdown);
+            });
+        });
+        const clearButton = dropdown.querySelector("[data-multi-filter-clear]");
+        if (clearButton) {
+            clearButton.addEventListener("click", function () {
+                dropdown.querySelectorAll("[data-multi-filter-checkbox]").forEach(function (checkbox) {
+                    checkbox.checked = false;
+                });
+                syncMultiFilterDropdown(dropdown);
+            });
+        }
+    });
+
     document.querySelectorAll("[data-choice-option]").forEach(function (button) {
         button.addEventListener("click", function () {
             const targetId = button.dataset.choiceTarget;

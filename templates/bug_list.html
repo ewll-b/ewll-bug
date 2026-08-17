@@ -4,33 +4,48 @@
 
 {% block content %}
 {% set version_display = namespace(label='版本') %}
-{% if filters.version %}
-    {% set version_display.label = filters.version %}
+{% if filters.version_values|length == 1 %}
+    {% set version_display.label = filters.version_values[0] %}
+{% elif filters.version_values|length > 1 %}
+    {% set version_display.label = '版本(' ~ filters.version_values|length ~ ')' %}
 {% endif %}
 {% set platform_display = namespace(label='端') %}
-{% for platform in bug_platform_options %}
-    {% if filters.platform == platform %}
-        {% set platform_display.label = platform %}
-    {% endif %}
-{% endfor %}
+{% if filters.platform_values|length == 1 %}
+    {% set platform_display.label = filters.platform_values[0] %}
+{% elif filters.platform_values|length > 1 %}
+    {% set platform_display.label = '端(' ~ filters.platform_values|length ~ ')' %}
+{% endif %}
 {% set creator_display = namespace(label='创建人') %}
-{% for user in users %}
-    {% if filters.creator_id == user.id|string %}
-        {% set creator_display.label = user.name %}
-    {% endif %}
-{% endfor %}
+{% if filters.creator_id_values|length == 1 %}
+    {% for user in users %}
+        {% if filters.creator_id_values[0] == user.id|string %}
+            {% set creator_display.label = user.name %}
+        {% endif %}
+    {% endfor %}
+{% elif filters.creator_id_values|length > 1 %}
+    {% set creator_display.label = '创建人(' ~ filters.creator_id_values|length ~ ')' %}
+{% endif %}
+{% set assignee_options = bug_assignee_users if bug_assignee_users is defined else users %}
 {% set assignee_display = namespace(label='处理人') %}
-{% for user in users %}
-    {% if filters.assignee_id == user.id|string %}
-        {% set assignee_display.label = user.name %}
-    {% endif %}
-{% endfor %}
+{% if filters.assignee_id_values|length == 1 %}
+    {% for user in assignee_options %}
+        {% if filters.assignee_id_values[0] == user.id|string %}
+            {% set assignee_display.label = user.name %}
+        {% endif %}
+    {% endfor %}
+{% elif filters.assignee_id_values|length > 1 %}
+    {% set assignee_display.label = '处理人(' ~ filters.assignee_id_values|length ~ ')' %}
+{% endif %}
 {% set status_display = namespace(label='状态') %}
-{% for code, label in g.status_options %}
-    {% if filters.status == code %}
-        {% set status_display.label = label %}
-    {% endif %}
-{% endfor %}
+{% if filters.status_values|length == 1 %}
+    {% for code, label in g.status_options %}
+        {% if filters.status_values[0] == code %}
+            {% set status_display.label = label %}
+        {% endif %}
+    {% endfor %}
+{% elif filters.status_values|length > 1 %}
+    {% set status_display.label = '状态(' ~ filters.status_values|length ~ ')' %}
+{% endif %}
 <section class="panel list-page-panel bug-list-panel">
     <div class="list-header-wrap">
         <div class="list-header single-row-header">
@@ -40,68 +55,78 @@
             </div>
             <form class="toolbar compact-toolbar header-toolbar" method="get" action="{{ url_for('bug_list') }}">
                 <input type="text" name="keyword" value="{{ filters.keyword }}" placeholder="搜索编号/标题/创建人/处理人">
-                <input id="bug-filter-version" type="hidden" name="version" value="{{ filters.version }}">
-                <details class="filter-dropdown filter-dropdown-sm">
+                <details class="filter-dropdown filter-dropdown-sm multi-filter-dropdown" data-multi-filter-dropdown data-filter-placeholder="版本">
                     <summary class="filter-select">
                         <span data-filter-label>{{ version_display.label }}</span>
                         <span class="filter-caret"></span>
                     </summary>
                     <div class="filter-menu">
-                        <button class="filter-option {% if not filters.version %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-version" data-filter-value="" data-filter-label="版本">全部版本</button>
+                        <button class="filter-option {% if not filters.version_values %}active{% endif %}" type="button" data-multi-filter-clear>全部版本</button>
                         {% for version in bug_versions %}
-                            <button class="filter-option {% if filters.version == version %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-version" data-filter-value="{{ version }}" data-filter-label="{{ version }}">{{ version }}</button>
+                            <label class="filter-option multi-filter-option {% if version in filters.version_values %}active{% endif %}">
+                                <input type="checkbox" name="version" value="{{ version }}" data-multi-filter-checkbox data-filter-label="{{ version }}" {% if version in filters.version_values %}checked{% endif %}>
+                                <span>{{ version }}</span>
+                            </label>
                         {% endfor %}
                     </div>
                 </details>
-                <input id="bug-filter-platform" type="hidden" name="platform" value="{{ filters.platform }}">
-                <details class="filter-dropdown filter-dropdown-sm">
+                <details class="filter-dropdown filter-dropdown-sm multi-filter-dropdown" data-multi-filter-dropdown data-filter-placeholder="端">
                     <summary class="filter-select">
                         <span data-filter-label>{{ platform_display.label }}</span>
                         <span class="filter-caret"></span>
                     </summary>
                     <div class="filter-menu">
-                        <button class="filter-option {% if not filters.platform %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-platform" data-filter-value="" data-filter-label="端">全部端</button>
+                        <button class="filter-option {% if not filters.platform_values %}active{% endif %}" type="button" data-multi-filter-clear>全部端</button>
                         {% for platform in bug_platform_options %}
-                            <button class="filter-option {% if filters.platform == platform %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-platform" data-filter-value="{{ platform }}" data-filter-label="{{ platform }}">{{ platform }}</button>
+                            <label class="filter-option multi-filter-option {% if platform in filters.platform_values %}active{% endif %}">
+                                <input type="checkbox" name="platform" value="{{ platform }}" data-multi-filter-checkbox data-filter-label="{{ platform }}" {% if platform in filters.platform_values %}checked{% endif %}>
+                                <span>{{ platform }}</span>
+                            </label>
                         {% endfor %}
                     </div>
                 </details>
-                <input id="bug-filter-creator" type="hidden" name="creator_id" value="{{ filters.creator_id }}">
-                <details class="filter-dropdown filter-dropdown-md">
+                <details class="filter-dropdown filter-dropdown-md multi-filter-dropdown" data-multi-filter-dropdown data-filter-placeholder="创建人">
                     <summary class="filter-select">
                         <span data-filter-label>{{ creator_display.label }}</span>
                         <span class="filter-caret"></span>
                     </summary>
                     <div class="filter-menu">
-                        <button class="filter-option {% if not filters.creator_id %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-creator" data-filter-value="" data-filter-label="创建人">全部创建人</button>
+                        <button class="filter-option {% if not filters.creator_id_values %}active{% endif %}" type="button" data-multi-filter-clear>全部创建人</button>
                         {% for user in users %}
-                            <button class="filter-option {% if filters.creator_id == user.id|string %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-creator" data-filter-value="{{ user.id }}" data-filter-label="{{ user.name }}">{{ user.name }}</button>
+                            <label class="filter-option multi-filter-option {% if user.id|string in filters.creator_id_values %}active{% endif %}">
+                                <input type="checkbox" name="creator_id" value="{{ user.id }}" data-multi-filter-checkbox data-filter-label="{{ user.name }}" {% if user.id|string in filters.creator_id_values %}checked{% endif %}>
+                                <span>{{ user.name }}</span>
+                            </label>
                         {% endfor %}
                     </div>
                 </details>
-                <input id="bug-filter-assignee" type="hidden" name="assignee_id" value="{{ filters.assignee_id }}">
-                <details class="filter-dropdown filter-dropdown-md">
+                <details class="filter-dropdown filter-dropdown-md multi-filter-dropdown" data-multi-filter-dropdown data-filter-placeholder="处理人">
                     <summary class="filter-select">
                         <span data-filter-label>{{ assignee_display.label }}</span>
                         <span class="filter-caret"></span>
                     </summary>
                     <div class="filter-menu">
-                        <button class="filter-option {% if not filters.assignee_id %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-assignee" data-filter-value="" data-filter-label="处理人">全部处理人</button>
-                        {% for user in users %}
-                            <button class="filter-option {% if filters.assignee_id == user.id|string %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-assignee" data-filter-value="{{ user.id }}" data-filter-label="{{ user.name }}">{{ user.name }}</button>
+                        <button class="filter-option {% if not filters.assignee_id_values %}active{% endif %}" type="button" data-multi-filter-clear>全部处理人</button>
+                        {% for user in assignee_options %}
+                            <label class="filter-option multi-filter-option {% if user.id|string in filters.assignee_id_values %}active{% endif %}">
+                                <input type="checkbox" name="assignee_id" value="{{ user.id }}" data-multi-filter-checkbox data-filter-label="{{ user.name }}" {% if user.id|string in filters.assignee_id_values %}checked{% endif %}>
+                                <span>{{ user.name }}</span>
+                            </label>
                         {% endfor %}
                     </div>
                 </details>
-                <input id="bug-filter-status" type="hidden" name="status" value="{{ filters.status }}">
-                <details class="filter-dropdown filter-dropdown-sm">
+                <details class="filter-dropdown filter-dropdown-sm multi-filter-dropdown" data-multi-filter-dropdown data-filter-placeholder="状态">
                     <summary class="filter-select">
                         <span data-filter-label>{{ status_display.label }}</span>
                         <span class="filter-caret"></span>
                     </summary>
                     <div class="filter-menu">
-                        <button class="filter-option {% if not filters.status %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-status" data-filter-value="" data-filter-label="状态">全部状态</button>
+                        <button class="filter-option {% if not filters.status_values %}active{% endif %}" type="button" data-multi-filter-clear>全部状态</button>
                         {% for code, label in g.status_options %}
-                            <button class="filter-option {% if filters.status == code %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-filter-status" data-filter-value="{{ code }}" data-filter-label="{{ label }}">{{ label }}</button>
+                            <label class="filter-option multi-filter-option {% if code in filters.status_values %}active{% endif %}">
+                                <input type="checkbox" name="status" value="{{ code }}" data-multi-filter-checkbox data-filter-label="{{ label }}" {% if code in filters.status_values %}checked{% endif %}>
+                                <span>{{ label }}</span>
+                            </label>
                         {% endfor %}
                     </div>
                 </details>
@@ -111,10 +136,10 @@
                 <a class="btn btn-secondary mini" href="{{ url_for('bug_list') }}">重置</a>
             </form>
             <div class="head-stats list-stats">
-                <span>总数：{{ summary.total }}</span>
-                <span>待处理：{{ summary.active_count }}</span>
-                <span>待验证：{{ summary.verification_count }}</span>
-                <span>已关闭：{{ summary.closed_count }}</span>
+                <span>总数：{{ bug_summary.total }}</span>
+                <span>待处理：{{ bug_summary.active_count }}</span>
+                <span>待验证：{{ bug_summary.verification_count }}</span>
+                <span>已关闭：{{ bug_summary.closed_count }}</span>
             </div>
         </div>
     </div>

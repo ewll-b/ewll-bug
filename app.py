@@ -92,6 +92,7 @@ REPORT_PLATFORM_LABELS = {
     "iOS": "IOS",
 }
 BUG_PRIORITY_OPTIONS = BUG_SEVERITY_OPTIONS.copy()
+BUG_MULTI_FILTER_KEYS = ("version", "platform", "creator_id", "assignee_id", "status")
 COMMENT_NOTIFICATION_CATEGORIES = ("bug_comment", "comment_mention")
 NOTIFICATION_CATEGORY_LABELS = {
     "bug_comment": "评论",
@@ -1217,8 +1218,29 @@ def create_app(test_config: dict | None = None) -> Flask:
     def fetch_users() -> list[sqlite3.Row]:
         return get_db().execute("SELECT * FROM users ORDER BY id").fetchall()
 
+    def is_bug_assignee_user(user: sqlite3.Row | None) -> bool:
+        return user is not None and str(user["username"] or "").strip().lower() != "admin"
+
+    def fetch_bug_assignee_users() -> list[sqlite3.Row]:
+        return get_db().execute(
+            """
+            SELECT *
+            FROM users
+            WHERE LOWER(COALESCE(username, '')) != 'admin'
+            ORDER BY id
+            """
+        ).fetchall()
+
     def fetch_user(user_id: int) -> sqlite3.Row | None:
         return get_db().execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    def fetch_bug_assignee_user(user_id: object) -> sqlite3.Row | None:
+        try:
+            target_user_id = int(user_id)
+        except (TypeError, ValueError):
+            return None
+        user = fetch_user(target_user_id)
+        return user if is_bug_assignee_user(user) else None
 
     def fetch_mail_settings() -> dict[str, str]:
         row = get_db().execute("SELECT * FROM mail_settings WHERE id = 1").fetchone()
@@ -1872,6 +1894,20 @@ def create_app(test_config: dict | None = None) -> Flask:
             return text
         return f"{text[:limit].rstrip()}..."
 
+    def build_lark_link_button(label: str, target_url: str, button_type: str = "default") -> dict[str, object]:
+        return {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": label},
+            "type": button_type,
+            "url": target_url,
+            "multi_url": {
+                "url": target_url,
+                "pc_url": target_url,
+                "ios_url": target_url,
+                "android_url": target_url,
+            },
+        }
+
     def build_new_bug_group_card_payload(
         bug: sqlite3.Row,
         operator_name: str,
@@ -1895,33 +1931,24 @@ def create_app(test_config: dict | None = None) -> Flask:
         actions: list[dict[str, object]] = []
         if bug_url:
             actions.append(
-                {
-                    "tag": "button",
-                    "text": {"tag": "plain_text", "content": "查看 Bug 详情"},
-                    "type": "primary",
-                    "url": bug_url,
-                }
+                build_lark_link_button("查看 Bug 详情", bug_url, button_type="primary")
             )
         if bug["requirement_id"]:
             actions.append(
-                {
-                    "tag": "button",
-                    "text": {"tag": "plain_text", "content": "进入需求页"},
-                    "type": "default",
-                    "url": build_app_absolute_url(
+                build_lark_link_button(
+                    "进入需求页",
+                    build_app_absolute_url(
                         "requirement_detail",
                         base_url,
                         requirement_id=int(bug["requirement_id"]),
                     ),
-                }
+                )
             )
         actions.append(
-            {
-                "tag": "button",
-                "text": {"tag": "plain_text", "content": "AI处理"},
-                "type": "default",
-                "url": build_app_absolute_url("bug_detail", base_url, bug_id=int(bug["id"]), tab="process"),
-            }
+            build_lark_link_button(
+                "AI处理",
+                build_app_absolute_url("bug_detail", base_url, bug_id=int(bug["id"]), tab="process"),
+            )
         )
         payload: dict[str, object] = {
             "msg_type": "interactive",
@@ -3229,11 +3256,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         thread = threading.Thread(target=scheduler_loop, name="todo-mail-scheduler", daemon=True)
         thread.start()
 
-    def admin_redirect_target() -> str:
-        next_url = request.form.get("next", "").strip()
-        if next_url.startswith("/"):
-            return next_url
-        return url_for("admin_center")
+    def is_safe_local_path(target: str) -> bool:
+        if not target.startswith("/") or target.startswith("//") or target.startswith("/\\"):
+            return False
+        if "\\" in target:
+            return False
+        return not any(ord(char) < 32 or ord(char) == 127 for char in target)
 
     def local_redirect_target(raw_target: str, default_url: str) -> str:
         target = str(raw_target or "").strip()
@@ -3241,29 +3269,37 @@ def create_app(test_config: dict | None = None) -> Flask:
             return default_url
         parsed = urllib_parse.urlparse(target)
         if parsed.netloc or parsed.scheme:
-            if parsed.netloc != request.host:
+            if parsed.scheme not in {"http", "https"} or parsed.netloc != request.host:
                 return default_url
             target = parsed.path or default_url
             if parsed.query:
                 target = f"{target}?{parsed.query}"
             if parsed.fragment:
                 target = f"{target}#{parsed.fragment}"
-        return target if target.startswith("/") else default_url
+        return target if is_safe_local_path(target) else default_url
+
+    def admin_redirect_target() -> str:
+        return local_redirect_target(request.form.get("next", ""), url_for("admin_center"))
 
     def local_back_url(default_url: str) -> str:
-        next_url = request.values.get("next", "").strip()
-        if next_url.startswith("/"):
+        next_url = local_redirect_target(request.values.get("next", ""), "")
+        if next_url:
             return next_url
         referrer = (request.referrer or "").strip()
         if not referrer:
             return default_url
         parsed = urllib_parse.urlparse(referrer)
-        if parsed.netloc not in {"", request.host}:
+        if parsed.netloc or parsed.scheme:
+            if parsed.scheme not in {"http", "https"} or parsed.netloc != request.host:
+                return default_url
+        elif not is_safe_local_path(referrer):
             return default_url
         candidate = parsed.path or default_url
         if parsed.query:
             candidate = f"{candidate}?{parsed.query}"
-        return candidate if candidate.startswith("/") else default_url
+        if parsed.fragment:
+            candidate = f"{candidate}#{parsed.fragment}"
+        return local_redirect_target(candidate, default_url)
 
     def require_admin_access() -> Response | None:
         if not is_admin():
@@ -3727,24 +3763,41 @@ def create_app(test_config: dict | None = None) -> Flask:
             return None
         return fetch_project(project_id)
 
+    def clean_filter_values(raw_values: object) -> list[str]:
+        if raw_values is None:
+            return []
+        if isinstance(raw_values, str):
+            source_values = [raw_values]
+        elif isinstance(raw_values, (list, tuple, set)):
+            source_values = list(raw_values)
+        else:
+            source_values = [raw_values]
+        values: list[str] = []
+        for raw_value in source_values:
+            for part in str(raw_value or "").split(","):
+                value = part.strip()
+                if value and value not in values:
+                    values.append(value)
+        return values
+
+    def filter_values(filters: dict, key: str) -> list[str]:
+        return clean_filter_values(filters.get(f"{key}_values") or filters.get(key, ""))
+
+    def add_multi_filter_clause(clauses: list[str], params: list[str], expression: str, values: list[str]) -> None:
+        if not values:
+            return
+        placeholders = ", ".join("?" for _ in values)
+        clauses.append(f"{expression} IN ({placeholders})")
+        params.extend(values)
+
     def build_bug_where(filters: dict) -> tuple[str, list[str]]:
         clauses = ["bugs.project_id = ?"]
         params: list[str] = [str(current_project_id() or 0)]
-        if filters.get("version"):
-            clauses.append("COALESCE(bugs.version, '') = ?")
-            params.append(filters["version"])
-        if filters.get("platform"):
-            clauses.append("COALESCE(bugs.platform, '') = ?")
-            params.append(filters["platform"])
-        if filters.get("creator_id"):
-            clauses.append("bugs.creator_id = ?")
-            params.append(filters["creator_id"])
-        if filters.get("assignee_id"):
-            clauses.append("bugs.assignee_id = ?")
-            params.append(filters["assignee_id"])
-        if filters.get("status"):
-            clauses.append("bugs.status = ?")
-            params.append(filters["status"])
+        add_multi_filter_clause(clauses, params, "COALESCE(bugs.version, '')", filter_values(filters, "version"))
+        add_multi_filter_clause(clauses, params, "COALESCE(bugs.platform, '')", filter_values(filters, "platform"))
+        add_multi_filter_clause(clauses, params, "bugs.creator_id", filter_values(filters, "creator_id"))
+        add_multi_filter_clause(clauses, params, "bugs.assignee_id", filter_values(filters, "assignee_id"))
+        add_multi_filter_clause(clauses, params, "bugs.status", filter_values(filters, "status"))
         if filters.get("created_from"):
             clauses.append("date(bugs.created_at) >= date(?)")
             params.append(filters["created_from"])
@@ -3760,7 +3813,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         return " AND ".join(clauses), params
 
     def fetch_filters() -> dict:
-        return {
+        filters = {
             "version": request.args.get("version", "").strip(),
             "platform": request.args.get("platform", "").strip(),
             "creator_id": request.args.get("creator_id", "").strip(),
@@ -3770,6 +3823,11 @@ def create_app(test_config: dict | None = None) -> Flask:
             "created_to": request.args.get("created_to", "").strip(),
             "keyword": request.args.get("keyword", "").strip(),
         }
+        for key in BUG_MULTI_FILTER_KEYS:
+            values = clean_filter_values(request.args.getlist(key))
+            filters[f"{key}_values"] = values
+            filters[key] = values[0] if len(values) == 1 else ""
+        return filters
 
     def fetch_bug_versions(project_id: int | None = None) -> list[str]:
         target_project_id = project_id or current_project_id()
@@ -3863,6 +3921,30 @@ def create_app(test_config: dict | None = None) -> Flask:
             "page_items": build_pagination_items(page, pages),
         }
 
+    def fetch_bug_summary(filters: dict) -> dict:
+        db = get_db()
+        where_sql, params = build_bug_where(filters)
+        summary = db.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN bugs.status IN ('open', 'in_progress') THEN 1 ELSE 0 END) AS active_count,
+                SUM(CASE WHEN bugs.status = 'pending_verification' THEN 1 ELSE 0 END) AS verification_count,
+                SUM(CASE WHEN bugs.status IN ('closed', 'duplicate', 'on_hold') THEN 1 ELSE 0 END) AS closed_count
+            FROM bugs
+            LEFT JOIN users creator ON bugs.creator_id = creator.id
+            LEFT JOIN users assignee ON bugs.assignee_id = assignee.id
+            WHERE {where_sql}
+            """,
+            params,
+        ).fetchone()
+        return {
+            "total": int(summary["total"] or 0),
+            "active_count": int(summary["active_count"] or 0),
+            "verification_count": int(summary["verification_count"] or 0),
+            "closed_count": int(summary["closed_count"] or 0),
+        }
+
     def fetch_case_page(page: int) -> dict:
         db = get_db()
         project_id = current_project_id()
@@ -3937,6 +4019,47 @@ def create_app(test_config: dict | None = None) -> Flask:
         if text.lower() == "none":
             return ""
         return text
+
+    def excel_image_anchor_cell(image: object) -> tuple[int, int] | None:
+        anchor = getattr(image, "anchor", None)
+        marker = getattr(anchor, "_from", None)
+        if marker is not None:
+            row_index = int(getattr(marker, "row", -1)) + 1
+            column_index = int(getattr(marker, "col", -1))
+            if row_index > 0 and column_index >= 0:
+                return row_index, column_index
+        if isinstance(anchor, str):
+            try:
+                row_index, column_index = openpyxl.utils.cell.coordinate_to_tuple(anchor)
+            except ValueError:
+                return None
+            return row_index, column_index - 1
+        return None
+
+    def collect_sheet_image_cells(sheet) -> dict[tuple[int, int], int]:
+        image_cells: dict[tuple[int, int], int] = {}
+        for image in getattr(sheet, "_images", []) or []:
+            cell = excel_image_anchor_cell(image)
+            if cell is None:
+                continue
+            image_cells[cell] = image_cells.get(cell, 0) + 1
+        return image_cells
+
+    def count_excel_images_in_row(image_cells: dict[tuple[int, int], int], row_index: int) -> int:
+        return sum(count for (image_row, _column_index), count in image_cells.items() if image_row == row_index)
+
+    def count_excel_images_in_cell(image_cells: dict[tuple[int, int], int], row_index: int, column_index: int | None) -> int:
+        if column_index is None:
+            return 0
+        return image_cells.get((row_index, column_index), 0)
+
+    def append_excel_image_marker(text: str, image_count: int) -> str:
+        if image_count <= 0:
+            return text
+        marker = "[原Excel含图片]" if image_count == 1 else f"[原Excel含{image_count}张图片]"
+        if marker in text:
+            return text
+        return f"{text}\n{marker}" if text else marker
 
     def normalize_header_key(value: object) -> str:
         text = normalize_excel_text(value)
@@ -5370,7 +5493,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             .fetchone()["count"]
         )
 
-    def fetch_summary(version: str = "", project_id: int | None = None, user_id: int | None = None) -> dict:
+    def fetch_summary(version: str | list[str] = "", project_id: int | None = None, user_id: int | None = None) -> dict:
         db = get_db()
         target_project_id = project_id or current_project_id()
         current_user = g.get("current_user")
@@ -5383,8 +5506,13 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "my_todo_count": 0,
                 "notification_unread_count": 0,
             }
-        version_sql = " AND COALESCE(version, '') = ?" if version else ""
-        version_params = [version] if version else []
+        version_values = clean_filter_values(version)
+        version_sql = ""
+        version_params: list[str] = []
+        if version_values:
+            placeholders = ", ".join("?" for _ in version_values)
+            version_sql = f" AND COALESCE(version, '') IN ({placeholders})"
+            version_params = version_values
         total = db.execute(
             f"SELECT COUNT(*) AS count FROM bugs WHERE project_id = ?{version_sql}",
             [target_project_id, *version_params],
@@ -5409,10 +5537,10 @@ def create_app(test_config: dict | None = None) -> Flask:
                 SELECT COUNT(*) AS count
                 FROM bugs
                 WHERE project_id = ? AND assignee_id = ?
-                    {f"AND COALESCE(version, '') = ?" if version else ""}
+                    {version_sql}
                     AND status IN ('open', 'in_progress', 'pending_verification')
                 """,
-                [target_project_id, target_user_id, *version_params] if version else (target_project_id, target_user_id),
+                [target_project_id, target_user_id, *version_params],
             ).fetchone()["count"]
         notification_unread_count = count_user_notifications(target_user_id, unread_only=True) if target_user_id is not None else 0
         return {
@@ -6163,11 +6291,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         elif action == "reassign":
             if not assignee_id:
                 raise ValueError("请选择转交处理人。")
-            new_assignee_id = assignee_id
-            new_previous_assignee_id = derive_previous_assignee_id_for_bug(bug, assignee_id)
+            target_user = fetch_bug_assignee_user(assignee_id)
+            if target_user is None:
+                raise ValueError("缺陷处理人不能选择 admin 账号。")
+            new_assignee_id = int(target_user["id"])
+            new_previous_assignee_id = derive_previous_assignee_id_for_bug(bug, new_assignee_id)
             action_label = "转交处理"
-            target_user = fetch_user(assignee_id)
-            target_name = target_user["name"] if target_user else "未命名成员"
+            target_name = target_user["name"]
             detail = f"{operator_name} 转交给 {target_name}"
         elif action == "change_status":
             selected_status = request.form.get("status", "").strip()
@@ -6312,13 +6442,30 @@ def create_app(test_config: dict | None = None) -> Flask:
         )
 
     def build_page_url(page_number: int, filters: dict) -> str:
-        query = {key: value for key, value in filters.items() if value}
-        query["page"] = page_number
-        return url_for("bug_list", **query)
+        query_items: list[tuple[str, object]] = []
+        for key, value in filters.items():
+            if key.endswith("_values"):
+                continue
+            if key in BUG_MULTI_FILTER_KEYS:
+                for selected_value in filter_values(filters, key):
+                    query_items.append((key, selected_value))
+            elif value:
+                query_items.append((key, value))
+        query_items.append(("page", page_number))
+        return f"{url_for('bug_list')}?{urllib_parse.urlencode(query_items)}"
 
     def build_page_jump_url(filters: dict) -> str:
-        query = {key: value for key, value in filters.items() if value}
-        return url_for("bug_list", **query)
+        query_items: list[tuple[str, object]] = []
+        for key, value in filters.items():
+            if key.endswith("_values"):
+                continue
+            if key in BUG_MULTI_FILTER_KEYS:
+                for selected_value in filter_values(filters, key):
+                    query_items.append((key, selected_value))
+            elif value:
+                query_items.append((key, value))
+        query = urllib_parse.urlencode(query_items)
+        return f"{url_for('bug_list')}?{query}" if query else url_for("bug_list")
 
     def build_requirement_page_url(page_number: int, filters: dict) -> str:
         query = {key: value for key, value in filters.items() if value}
@@ -6349,7 +6496,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             g.current_user = fetch_user(int(user_id))
         endpoint = request.endpoint or ""
         if endpoint not in {"login", "static"} and g.current_user is None:
-            return redirect(url_for("login"))
+            next_url = request.full_path if request.query_string else request.path
+            return redirect(f"{url_for('login')}?{urllib_parse.urlencode({'next': next_url})}")
         g.projects = fetch_projects()
         g.current_project = fetch_current_project()
         return None
@@ -6391,6 +6539,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.route("/login", methods=["GET", "POST"])
     def login() -> str | Response:
+        next_url = local_redirect_target(request.values.get("next", ""), url_for("bug_list"))
         if request.method == "POST":
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "").strip()
@@ -6402,8 +6551,8 @@ def create_app(test_config: dict | None = None) -> Flask:
                 first_project = fetch_projects()[0]
                 session["project_id"] = first_project["id"]
                 flash(f"已登录为 {user['name']}。", "success")
-                return redirect(url_for("bug_list"))
-        return render_template("login.html")
+                return redirect(next_url)
+        return render_template("login.html", login_next=next_url)
 
     @app.route("/logout")
     def logout() -> Response:
@@ -6427,14 +6576,16 @@ def create_app(test_config: dict | None = None) -> Flask:
         filters = fetch_filters()
         page = request_page()
         bug_page = fetch_bug_page(filters, page)
+        bug_select_users = fetch_bug_assignee_users()
         return render_template(
             "bug_list.html",
             bugs=bug_page["items"],
             bug_page=bug_page,
-            users=fetch_users(),
+            users=bug_select_users,
+            bug_assignee_users=bug_select_users,
             bug_versions=fetch_bug_versions(),
             filters=filters,
-            summary=fetch_summary(filters.get("version", "").strip()),
+            bug_summary=fetch_bug_summary(filters),
             requirements=fetch_requirements(),
             cases=fetch_cases_for_project(),
             bug_form_values={"version": filters.get("version", "").strip()},
@@ -6772,6 +6923,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             seen_case_nos: set[str] = set()
             sheet_imported_count = 0
             sheet_doc_name = default_doc_name if not multi_sheet_mode else f"{default_doc_name} / {sheet.title}"
+            sheet_image_cells = collect_sheet_image_cells(sheet)
 
             def insert_case_row(
                 *,
@@ -6837,7 +6989,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 sheet_imported_count += 1
 
             if header_row_index is not None:
-                for row in sheet.iter_rows(min_row=header_row_index + 1, values_only=True):
+                for row_index, row in enumerate(sheet.iter_rows(min_row=header_row_index + 1, values_only=True), start=header_row_index + 1):
                     if not row:
                         continue
 
@@ -6846,6 +6998,13 @@ def create_app(test_config: dict | None = None) -> Flask:
                         if column_index is None or column_index >= len(row):
                             return ""
                         return normalize_excel_text(row[column_index])
+
+                    def mapped_text_with_images(field_name: str) -> str:
+                        column_index = header_mapping.get(field_name)
+                        return append_excel_image_marker(
+                            mapped_text(field_name),
+                            count_excel_images_in_cell(sheet_image_cells, row_index, column_index),
+                        )
 
                     case_no = mapped_text("case_no")
                     if not case_no:
@@ -6857,12 +7016,19 @@ def create_app(test_config: dict | None = None) -> Flask:
                     title = mapped_text("title")
                     priority_level = mapped_text("priority_level") or "P1"
                     module_name_raw = mapped_text("module_name")
-                    steps = mapped_text("steps")
-                    expected_result = mapped_text("expected_result")
-                    actual_result = mapped_text("actual_result")
-                    remark = mapped_text("remark")
+                    steps = mapped_text_with_images("steps")
+                    expected_result = mapped_text_with_images("expected_result")
+                    actual_result = mapped_text_with_images("actual_result")
+                    remark = mapped_text_with_images("remark")
                     executor = mapped_text("executor")
                     version = infer_case_version(case_no, mapped_text("version")) or default_version
+                    mapped_image_count = sum(
+                        count_excel_images_in_cell(sheet_image_cells, row_index, header_mapping.get(field_name))
+                        for field_name in ("steps", "expected_result", "actual_result", "remark")
+                    )
+                    unmapped_image_count = max(0, count_excel_images_in_row(sheet_image_cells, row_index) - mapped_image_count)
+                    if unmapped_image_count:
+                        remark = append_excel_image_marker(remark, unmapped_image_count)
 
                     execute_status_raw = mapped_text("execute_status")
                     ios_result = normalize_platform_result(mapped_text("ios_result"))
@@ -6920,7 +7086,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 continue
 
             start_row = 4 if sheet.max_row >= 4 else 1
-            for row in sheet.iter_rows(min_row=start_row, values_only=True):
+            for row_index, row in enumerate(sheet.iter_rows(min_row=start_row, values_only=True), start=start_row):
                 if not row:
                     continue
                 case_no = normalize_excel_text(row[0]) if len(row) > 0 else ""
@@ -6929,14 +7095,21 @@ def create_app(test_config: dict | None = None) -> Flask:
                 priority_level = normalize_excel_text(row[1]) if len(row) > 1 else "P1"
                 module_name_raw = normalize_excel_text(row[2]) if len(row) > 2 else ""
                 title = normalize_excel_text(row[2]) if len(row) > 2 else ""
-                steps = normalize_excel_text(row[3]) if len(row) > 3 else ""
-                expected_result = normalize_excel_text(row[4]) if len(row) > 4 else ""
-                actual_result = normalize_excel_text(row[5]) if len(row) > 5 else ""
+                steps = append_excel_image_marker(normalize_excel_text(row[3]) if len(row) > 3 else "", count_excel_images_in_cell(sheet_image_cells, row_index, 3))
+                expected_result = append_excel_image_marker(normalize_excel_text(row[4]) if len(row) > 4 else "", count_excel_images_in_cell(sheet_image_cells, row_index, 4))
+                actual_result = append_excel_image_marker(normalize_excel_text(row[5]) if len(row) > 5 else "", count_excel_images_in_cell(sheet_image_cells, row_index, 5))
                 ios_result = normalize_platform_result(row[5] if len(row) > 5 else "")
                 android_result = normalize_platform_result(row[6] if len(row) > 6 else "")
                 h5_result = normalize_platform_result(row[7] if len(row) > 7 else "")
-                remark = normalize_excel_text(row[8]) if len(row) > 8 else ""
+                remark = append_excel_image_marker(normalize_excel_text(row[8]) if len(row) > 8 else "", count_excel_images_in_cell(sheet_image_cells, row_index, 8))
                 executor = normalize_excel_text(row[9]) if len(row) > 9 else ""
+                mapped_image_count = sum(
+                    count_excel_images_in_cell(sheet_image_cells, row_index, column_index)
+                    for column_index in (3, 4, 5, 8)
+                )
+                unmapped_image_count = max(0, count_excel_images_in_row(sheet_image_cells, row_index) - mapped_image_count)
+                if unmapped_image_count:
+                    remark = append_excel_image_marker(remark, unmapped_image_count)
                 if not has_meaningful_case_content(
                     title=title,
                     module_name=module_name_raw,
@@ -7225,7 +7398,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.route("/bugs/new", methods=["GET", "POST"])
     def create_bug() -> str | Response:
         db = get_db()
-        users = fetch_users()
+        users = fetch_bug_assignee_users()
         requirements = fetch_requirements()
         cases = fetch_cases_for_project()
         back_url = local_back_url(url_for("bug_list"))
@@ -7254,10 +7427,15 @@ def create_app(test_config: dict | None = None) -> Flask:
             attachments = bug_form["attachments"]
             inline_images = bug_form["inline_images"]
             inline_image_sources = bug_form["inline_image_sources"]
+            assignee_user = fetch_bug_assignee_user(assignee_id)
             if not all([title, version, module, platform, severity, assignee_id, description]):
                 if wants_json_response():
                     return jsonify({"ok": False, "message": "请完整填写必填项。"}), 400
                 flash("请完整填写必填项。", "error")
+            elif assignee_user is None:
+                if wants_json_response():
+                    return jsonify({"ok": False, "message": "缺陷处理人不能选择 admin 账号。"}), 400
+                flash("缺陷处理人不能选择 admin 账号。", "error")
             else:
                 bug_id = insert_bug(
                     db=db,
@@ -7269,9 +7447,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                     severity=severity,
                     priority=priority,
                     status="open",
-                    assignee_id=int(assignee_id),
+                    assignee_id=int(assignee_user["id"]),
                     creator_id=int(g.current_user["id"]),
-                    previous_assignee_id=int(assignee_id),
+                    previous_assignee_id=int(assignee_user["id"]),
                     requirement_id=int(requirement_id) if requirement_id else None,
                     case_id=int(case_id) if case_id else None,
                     environment=environment,
@@ -7280,7 +7458,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     actual_result=actual_result,
                     resolution_note="",
                 )
-                assignee_name = db.execute("SELECT name FROM users WHERE id = ?", (assignee_id,)).fetchone()["name"]
+                assignee_name = assignee_user["name"]
                 saved_names = save_bug_attachments(db, bug_id, attachments)
                 saved_inline_names = save_bug_attachments(db, bug_id, inline_images, inline_image_sources)
                 detail = f"{g.current_user['name']} 创建缺陷并指派给 {assignee_name}"
@@ -7368,7 +7546,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             mention_users=mention_users,
             related_mention_users=build_bug_mention_users(bug, comments),
             unread_comment_count=unread_comment_count,
-            users=fetch_users(),
+            users=fetch_bug_assignee_users(),
             requirements=fetch_requirements(),
             cases=fetch_cases_for_project(),
             attachments=attachments,
@@ -7486,16 +7664,20 @@ def create_app(test_config: dict | None = None) -> Flask:
         attachments = bug_form["attachments"]
         inline_images = bug_form["inline_images"]
         inline_image_sources = bug_form["inline_image_sources"]
+        assignee_user = fetch_bug_assignee_user(assignee_id)
 
         if not all([title, version, module, platform, severity, assignee_id, description]):
             flash("请完整填写必填项。", "error")
+            return redirect(url_for("bug_detail", bug_id=bug_id, tab="detail", edit="1", next=back_url))
+        if assignee_user is None:
+            flash("缺陷处理人不能选择 admin 账号。", "error")
             return redirect(url_for("bug_detail", bug_id=bug_id, tab="detail", edit="1", next=back_url))
 
         saved_names = save_bug_attachments(db, bug_id, attachments)
         saved_inline_names = save_bug_attachments(db, bug_id, inline_images, inline_image_sources)
         previous_severity = str(bug["severity"] or "")
         previous_assignee_id = int(bug["assignee_id"] or 0)
-        next_assignee_id = int(assignee_id)
+        next_assignee_id = int(assignee_user["id"])
         next_previous_assignee_id = derive_previous_assignee_id_for_bug(bug, next_assignee_id)
         db.execute(
             """
@@ -7529,7 +7711,6 @@ def create_app(test_config: dict | None = None) -> Flask:
             detail += f"；新增附件 {len(saved_names)} 个"
         if saved_inline_names:
             detail += f"；插入正文图片 {len(saved_inline_names)} 张"
-        target_user = fetch_user(next_assignee_id)
         add_history(
             db,
             bug_id,
@@ -7538,7 +7719,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             g.current_user["name"],
             environment_snapshot=environment,
             status_snapshot=bug["status"],
-            assignee_snapshot=target_user["name"] if target_user else bug["assignee_name"],
+            assignee_snapshot=assignee_user["name"],
         )
         db.commit()
         bump_bug_sync_token()
@@ -7693,7 +7874,13 @@ def create_app(test_config: dict | None = None) -> Flask:
                 f"严重Bug通知已发送，{notify_message}" if notify_sent else f"严重Bug通知未发送：{notify_message}",
                 "success" if notify_sent else "error",
             )
-        if new_status == "closed":
+        todo_redirect_path = url_for("my_todo_page")
+        returns_to_todo_page = (
+            redirect_target == todo_redirect_path
+            or redirect_target.startswith(f"{todo_redirect_path}?")
+            or redirect_target.startswith(f"{todo_redirect_path}#")
+        )
+        if new_status == "closed" and not returns_to_todo_page:
             return redirect(url_for("bug_list"))
         return redirect(redirect_target)
 

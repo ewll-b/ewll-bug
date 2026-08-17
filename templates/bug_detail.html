@@ -126,7 +126,7 @@
 <div class="page-backbar">
     <a class="btn btn-secondary mini back-btn" href="{{ back_url }}">返回上一页</a>
 </div>
-<section class="panel">
+<section class="panel bug-detail-panel">
     <div class="panel-head detail-page-head">
         <h2>缺陷详情</h2>
         {% if current_user and (is_admin or bug.creator_id == current_user.id) %}
@@ -195,9 +195,16 @@
             <label>
                 <span>当前处理人</span>
                 <select name="assignee_id">
+                    {% set edit_assignee = namespace(found=false) %}
                     {% for user in users %}
+                        {% if bug.assignee_id == user.id %}
+                            {% set edit_assignee.found = true %}
+                        {% endif %}
                         <option value="{{ user.id }}" {% if bug.assignee_id == user.id %}selected{% endif %}>{{ user.name }} · {{ user.role }}</option>
                     {% endfor %}
+                    {% if not edit_assignee.found %}
+                        <option value="" selected>请选择</option>
+                    {% endif %}
                 </select>
             </label>
             <label>

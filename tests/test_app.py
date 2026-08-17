@@ -136,6 +136,28 @@ class BugPlatformTestCase(unittest.TestCase):
         stream.seek(0)
         return stream
 
+    def build_case_excel_file_with_image_only_step(self) -> io.BytesIO:
+        from PIL import Image as PILImage
+        from openpyxl.drawing.image import Image as OpenpyxlImage
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "图片用例"
+        sheet.append(["测试环境：测试环境", "", "", "", "", "", "", "", ""])
+        sheet.append(["测试编号", "所属模块", "测试步骤", "预期结果", "实际结果", "", "", "优先级", "备注"])
+        sheet.append(["", "", "", "", "ios", "Android", "h5", "", ""])
+        sheet.append(["2.7.0-TC-IMG", "", "", "", "", "", "", "P1", ""])
+
+        image_stream = io.BytesIO()
+        PILImage.new("RGB", (12, 12), "#ff3333").save(image_stream, format="PNG")
+        image_stream.seek(0)
+        sheet.add_image(OpenpyxlImage(image_stream), "C4")
+
+        stream = io.BytesIO()
+        workbook.save(stream)
+        stream.seek(0)
+        return stream
+
     def enable_mail_notifications(self) -> None:
         with sqlite3.connect(self.app.config["DATABASE"]) as conn:
             conn.execute(
@@ -152,6 +174,31 @@ class BugPlatformTestCase(unittest.TestCase):
         response = self.client.get("/bugs", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login", response.headers["Location"])
+
+    def test_login_redirect_returns_to_original_detail_page(self) -> None:
+        response = self.client.get("/bugs/1?tab=detail", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+        self.assertIn("next=", response.headers["Location"])
+        self.assertIn("%3Ftab%3Ddetail", response.headers["Location"])
+
+        login_response = self.client.post(
+            response.headers["Location"],
+            data={"username": "lit", "password": "123456"},
+            follow_redirects=False,
+        )
+        self.assertEqual(login_response.status_code, 302)
+        self.assertEqual(login_response.headers["Location"], "/bugs/1?tab=detail")
+
+    def test_login_rejects_external_next_redirects(self) -> None:
+        response = self.client.post(
+            "/login?next=https://third-party.example/path",
+            data={"username": "lit", "password": "123456"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/bugs")
 
     def test_bug_list_loads_after_login(self) -> None:
         self.login_as("lit", "123456")
@@ -213,6 +260,110 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertNotIn('class="page-jump-form"'.encode("utf-8"), response.data)
         self.assertNotIn('btn btn-secondary mini page-number'.encode("utf-8"), response.data)
 
+    def test_bug_list_supports_multi_select_filters(self) -> None:
+        self.login_as("lit", "123456")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            creator = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
+            assignee = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
+            rows = [
+                ("MF-001", "多选筛选 A", "multi-a", "WEB", "WEB", "高", "高", "open"),
+                ("MF-002", "多选筛选 B", "multi-b", "APP", "Android", "高", "高", "pending_verification"),
+                ("MF-003", "多选筛选 C", "multi-c", "Backend", "后端", "高", "高", "closed"),
+            ]
+            conn.executemany(
+                """
+                INSERT INTO bugs (
+                    bug_no, title, version, module, platform, severity, priority, status,
+                    assignee_id, creator_id, reporter, environment, description,
+                    expected_result, actual_result, project_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                [
+                    (
+                        bug_no,
+                        title,
+                        version,
+                        module,
+                        platform,
+                        severity,
+                        priority,
+                        status,
+                        assignee["id"],
+                        creator["id"],
+                        "李婷",
+                        "测试环境",
+                        "验证多选筛选",
+                        "筛选正确",
+                        "待确认",
+                        "2026-07-15 10:00:00",
+                        "2026-07-15 10:00:00",
+                    )
+                    for bug_no, title, version, module, platform, severity, priority, status in rows
+                ],
+            )
+            conn.commit()
+
+        response = self.client.get("/bugs?version=multi-a&version=multi-b&status=open&status=pending_verification")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("共 2 条".encode("utf-8"), response.data)
+        self.assertIn("版本(2)".encode("utf-8"), response.data)
+        self.assertIn("状态(2)".encode("utf-8"), response.data)
+        self.assertIn("多选筛选 A".encode("utf-8"), response.data)
+        self.assertIn("多选筛选 B".encode("utf-8"), response.data)
+        self.assertNotIn("多选筛选 C".encode("utf-8"), response.data)
+
+    def test_bug_list_summary_uses_all_active_filters(self) -> None:
+        self.login_as("lit", "123456")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            creator = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
+            assignee = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
+            rows = [
+                ("FS-001", "筛选统计 WEB 打开", "summary-filter", "WEB", "open", "2026-07-15 10:00:00"),
+                ("FS-002", "筛选统计 WEB 待验证", "summary-filter", "WEB", "pending_verification", "2026-07-16 10:00:00"),
+                ("FS-003", "筛选统计 Android 关闭", "summary-filter", "Android", "closed", "2026-07-17 10:00:00"),
+            ]
+            conn.executemany(
+                """
+                INSERT INTO bugs (
+                    bug_no, title, version, module, platform, severity, priority, status,
+                    assignee_id, creator_id, reporter, environment, description,
+                    expected_result, actual_result, project_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 'APP', ?, '高', '高', ?, ?, ?, '李婷', '测试环境', '验证筛选统计', '统计正确', '待确认', 1, ?, ?)
+                """,
+                [
+                    (
+                        bug_no,
+                        title,
+                        version,
+                        platform,
+                        status,
+                        assignee["id"],
+                        creator["id"],
+                        created_at,
+                        created_at,
+                    )
+                    for bug_no, title, version, platform, status, created_at in rows
+                ],
+            )
+            conn.commit()
+
+        response = self.client.get("/bugs?version=summary-filter&platform=WEB")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("共 2 条".encode("utf-8"), response.data)
+        self.assertIn("总数：2".encode("utf-8"), response.data)
+        self.assertIn("待处理：1".encode("utf-8"), response.data)
+        self.assertIn("待验证：1".encode("utf-8"), response.data)
+        self.assertIn("已关闭：0".encode("utf-8"), response.data)
+        self.assertIn("筛选统计 WEB 打开".encode("utf-8"), response.data)
+        self.assertIn("筛选统计 WEB 待验证".encode("utf-8"), response.data)
+        self.assertNotIn("筛选统计 Android 关闭".encode("utf-8"), response.data)
+
     def test_bug_create_form_prefills_selected_version(self) -> None:
         self.login_as("lit", "123456")
 
@@ -231,6 +382,61 @@ class BugPlatformTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('data-filter-value="WEB"'.encode("utf-8"), response.data)
+
+    def test_bug_assignee_choices_exclude_admin(self) -> None:
+        self.login_as("lit", "123456")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            admin_user = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
+        self.assertIsNotNone(admin_user)
+
+        response = self.client.get("/bugs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("周越 · APP 开发".encode("utf-8"), response.data)
+        self.assertNotIn("Admin · 系统管理员".encode("utf-8"), response.data)
+        self.assertNotIn('data-filter-label="Admin"'.encode("utf-8"), response.data)
+        self.assertNotIn(
+            f'name="assignee_id" value="{admin_user["id"]}"'.encode("utf-8"),
+            response.data,
+        )
+        self.assertNotIn(
+            f'data-filter-target="bug-form-assignee" data-filter-value="{admin_user["id"]}"'.encode("utf-8"),
+            response.data,
+        )
+
+    def test_create_bug_rejects_admin_assignee(self) -> None:
+        self.login_as("lit", "123456")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            admin_user = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
+        self.assertIsNotNone(admin_user)
+
+        response = self.client.post(
+            "/bugs/new?format=json",
+            data={
+                "title": "不能指派 admin 的 Bug",
+                "version": "2.9.0",
+                "module": "APP",
+                "platform": "Android",
+                "severity": "高",
+                "assignee_id": str(admin_user["id"]),
+                "environment": "测试环境",
+                "description": "验证管理员不能成为缺陷处理人",
+                "expected_result": "提交失败",
+                "actual_result": "待验证",
+            },
+            headers={"Accept": "application/json"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["message"], "缺陷处理人不能选择 admin 账号。")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            bug_count = conn.execute(
+                "SELECT COUNT(*) FROM bugs WHERE title = ?",
+                ("不能指派 admin 的 Bug",),
+            ).fetchone()[0]
+        self.assertEqual(bug_count, 0)
 
     def test_bug_detail_edit_persists_changes_and_bumps_sync_token(self) -> None:
         self.login_as("admin", "admin123")
@@ -418,6 +624,22 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertIn('<th class="bug-col-platform">端</th>'.encode("utf-8"), response.data)
         self.assertIn("platform-chip".encode("utf-8"), response.data)
         self.assertIn("WEB".encode("utf-8"), response.data)
+
+    def test_my_todos_status_change_to_closed_stays_on_todos(self) -> None:
+        self.login_as("lit", "123456")
+
+        response = self.client.post(
+            "/bugs/3/update",
+            data={
+                "action": "change_status",
+                "status": "closed",
+                "redirect_to": "/todos",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/todos")
 
     def test_case_library_loads(self) -> None:
         self.login_as("lit", "123456")
@@ -879,6 +1101,29 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(row["android_result"], "pass")
         self.assertEqual(row["h5_result"], "")
 
+    def test_case_upload_imports_row_with_only_excel_image_content(self) -> None:
+        self.login_as("lit", "123456")
+        excel = self.build_case_excel_file_with_image_only_step()
+        response = self.client.post(
+            "/cases/upload",
+            data={"excel_file": (excel, "image_cases.xlsx"), "folder_name": "测试组"},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("已同步".encode("utf-8"), response.data)
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT case_no, title, steps FROM test_cases WHERE case_no = ?",
+                ("2.7.0-TC-IMG",),
+            ).fetchone()
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row["title"], "2.7.0-TC-IMG")
+        self.assertIn("原Excel含图片", row["steps"])
+
     def test_case_upload_skips_sparse_rows_with_only_case_number(self) -> None:
         self.login_as("lit", "123456")
         excel = self.build_case_excel_file_with_sparse_tail_rows()
@@ -1100,6 +1345,24 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertIn("AI处理", payload_text)
         self.assertIn("http://bug.test.local/bugs/", payload_text)
         self.assertIn("http://bug.test.local/requirements/", payload_text)
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            created_bug_id = conn.execute("SELECT id FROM bugs WHERE title = ?", ("需要发送到项目群的Bug",)).fetchone()[0]
+        action_element = next(element for element in payload["card"]["elements"] if element.get("tag") == "action")
+        buttons = {button["text"]["content"]: button for button in action_element["actions"]}
+        detail_url = f"http://bug.test.local/bugs/{created_bug_id}"
+        self.assertEqual(buttons["查看 Bug 详情"]["type"], "primary")
+        self.assertEqual(buttons["查看 Bug 详情"]["url"], detail_url)
+        self.assertEqual(
+            buttons["查看 Bug 详情"]["multi_url"],
+            {
+                "url": detail_url,
+                "pc_url": detail_url,
+                "ios_url": detail_url,
+                "android_url": detail_url,
+            },
+        )
+        self.assertEqual(buttons["进入需求页"]["url"], f"http://bug.test.local/requirements/{requirement_id}")
+        self.assertEqual(buttons["AI处理"]["url"], f"{detail_url}?tab=process")
         self.assertEqual(FakeGroupReportResponse.captured_requests[0].full_url, "https://open.feishu.cn/open-apis/bot/v2/hook/project-webhook")
 
     @mock.patch("app.urllib_request.urlopen", side_effect=fake_group_report_urlopen)
@@ -1804,6 +2067,32 @@ class BugPlatformTestCase(unittest.TestCase):
                 "action": "change_status",
                 "status": "in_progress",
                 "redirect_to": "https://example.com/elsewhere",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/bugs/1")
+
+    def test_bug_detail_rejects_protocol_relative_back_url(self) -> None:
+        self.login_as("zhouyue", "123456")
+
+        response = self.client.get("/bugs/1?next=//third-party.example/path")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/bugs"'.encode("utf-8"), response.data)
+        self.assertNotIn("third-party.example".encode("utf-8"), response.data)
+        self.assertNotIn("next=//third-party.example".encode("utf-8"), response.data)
+
+    def test_bug_update_rejects_protocol_relative_redirect_target(self) -> None:
+        self.login_as("zhouyue", "123456")
+
+        response = self.client.post(
+            "/bugs/1/update",
+            data={
+                "action": "change_status",
+                "status": "in_progress",
+                "redirect_to": "//third-party.example/elsewhere",
             },
             follow_redirects=False,
         )

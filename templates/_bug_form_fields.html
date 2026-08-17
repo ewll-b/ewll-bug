@@ -4,15 +4,17 @@
 {% set selected_assignee_id = form_values.assignee_id|string if form_values.assignee_id else '' %}
 {% set selected_requirement_id = form_values.requirement_id|string if form_values.requirement_id else '' %}
 {% set selected_case_id = form_values.case_id|string if form_values.case_id else '' %}
-{% set selected_assignee = namespace(value=selected_assignee_id, label='请选择') %}
-{% for user in users %}
+{% set assignee_options = bug_assignee_users if bug_assignee_users is defined else users %}
+{% set selected_assignee = namespace(value=selected_assignee_id, label='请选择', found=false) %}
+{% for user in assignee_options %}
     {% if selected_assignee.value == user.id|string %}
         {% set selected_assignee.label = user.name ~ ' · ' ~ user.role %}
+        {% set selected_assignee.found = true %}
     {% endif %}
 {% endfor %}
-{% if selected_assignee.value == '' and users %}
-    {% set selected_assignee.value = users[0].id|string %}
-    {% set selected_assignee.label = users[0].name ~ ' · ' ~ users[0].role %}
+{% if not selected_assignee.found and assignee_options %}
+    {% set selected_assignee.value = assignee_options[0].id|string %}
+    {% set selected_assignee.label = assignee_options[0].name ~ ' · ' ~ assignee_options[0].role %}
 {% endif %}
 {% set selected_requirement = namespace(label='不关联') %}
 {% for item in requirements %}
@@ -77,7 +79,7 @@
             <span class="filter-caret"></span>
         </summary>
         <div class="filter-menu">
-            {% for user in users %}
+            {% for user in assignee_options %}
                 {% set assignee_label = user.name ~ ' · ' ~ user.role %}
                 <button class="filter-option {% if selected_assignee.value == user.id|string %}active{% endif %}" type="button" data-filter-option data-filter-target="bug-form-assignee" data-filter-value="{{ user.id }}" data-filter-label="{{ assignee_label }}">{{ assignee_label }}</button>
             {% endfor %}

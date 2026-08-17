@@ -705,6 +705,10 @@ a {
 }
 
 .filter-option {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
     width: 100%;
     min-height: 36px;
     padding: 0 10px;
@@ -715,6 +719,25 @@ a {
     text-align: left;
     font-size: 13px;
     cursor: pointer;
+}
+
+.multi-filter-option {
+    box-sizing: border-box;
+}
+
+.multi-filter-option input {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    margin: 0;
+    accent-color: var(--color-accent-strong);
+}
+
+.multi-filter-option span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .filter-option:hover:not(.active) {
@@ -1924,8 +1947,9 @@ a {
 .info-item,
 .text-item {
     display: grid;
-    grid-template-columns: 86px 1fr;
+    grid-template-columns: 86px minmax(0, 1fr);
     gap: 12px;
+    min-width: 0;
 }
 
 .wide {
@@ -1937,15 +1961,26 @@ a {
     color: #606266;
 }
 
-.info-item span,
-.info-item .info-value {
+.info-item > span,
+.info-item > .info-value {
+    min-width: 0;
+    max-width: 100%;
     line-height: 1.7;
+    overflow-wrap: anywhere;
     word-break: break-word;
 }
 
-.text-item div {
+.bug-detail-panel .text-item {
+    grid-column: 1 / -1;
+}
+
+.text-item > div {
+    min-width: 0;
+    max-width: 100%;
     white-space: pre-wrap;
     line-height: 1.8;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .inline-attachment-gallery {
@@ -6640,6 +6675,12 @@ body {
     min-width: 100%;
     max-width: 100%;
     box-sizing: border-box;
+}
+
+.multi-filter-dropdown > .filter-menu {
+    width: max-content;
+    min-width: 100%;
+    max-width: 240px;
 }
 
 .project-switch-dropdown {
