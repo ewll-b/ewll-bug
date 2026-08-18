@@ -79,11 +79,11 @@ sudo systemctl status ewll-bug
 
 ## 6. test 发布目录注意事项
 
-test 机器如果使用 `/home/echooo/fed/ewll-bug-test/current` 作为当前发布目录，数据库和上传附件必须放在 `current` 外，避免发布切换后读到新的空数据库或新的上传目录。可参考 `deploy/ewll-bug-test.env.example`：
+test 机器如果使用 `/home/echooo/fed/ewll-bug-test/current` 作为当前发布目录，数据库和上传附件必须放在 `current` 外的 `shared` 目录，避免发布切换后读到新的空数据库或新的上传目录。可参考 `deploy/ewll-bug-test.env.example`：
 
 ```bash
-DATABASE=/home/echooo/fed/ewll-bug-test/data/bug_platform.db
-UPLOAD_FOLDER=/home/echooo/fed/ewll-bug-test/uploads
+DATABASE=/home/echooo/fed/ewll-bug-test/shared/data/bug_platform.db
+UPLOAD_FOLDER=/home/echooo/fed/ewll-bug-test/shared/uploads
 ```
 
 test 的 systemd 服务建议只使用 1 个 gunicorn worker：
@@ -96,8 +96,8 @@ ExecStart=/home/echooo/fed/ewll-bug-test/current/.venv/bin/gunicorn -w 1 -b 127.
 
 ```bash
 sudo systemctl stop ewll-bug-test
-mkdir -p /home/echooo/fed/ewll-bug-test/data /home/echooo/fed/ewll-bug-test/uploads
-cp /home/echooo/fed/ewll-bug-test/current/data/bug_platform.db /home/echooo/fed/ewll-bug-test/data/bug_platform.db
+mkdir -p /home/echooo/fed/ewll-bug-test/shared/data /home/echooo/fed/ewll-bug-test/shared/uploads
+cp /home/echooo/fed/ewll-bug-test/current/data/bug_platform.db /home/echooo/fed/ewll-bug-test/shared/data/bug_platform.db
 sudo systemctl daemon-reload
 sudo systemctl restart ewll-bug-test
 ```
