@@ -1007,6 +1007,27 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], "/todos")
 
+    def test_my_todos_status_change_keeps_proxy_prefix(self) -> None:
+        self.login_as("lit", "123456")
+
+        page = self.client.get("/todos", headers={"X-Forwarded-Prefix": "/qa"})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('name="redirect_to" value="/qa/todos"'.encode("utf-8"), page.data)
+
+        response = self.client.post(
+            "/bugs/3/update",
+            data={
+                "action": "change_status",
+                "status": "closed",
+                "redirect_to": "/qa/todos",
+            },
+            headers={"X-Forwarded-Prefix": "/qa"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/qa/todos")
+
     def test_case_library_loads(self) -> None:
         self.login_as("lit", "123456")
         response = self.client.get("/cases")

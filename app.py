@@ -3313,6 +3313,14 @@ def create_app(test_config: dict | None = None) -> Flask:
             candidate = f"{candidate}#{parsed.fragment}"
         return local_redirect_target(candidate, default_url)
 
+    def current_local_path() -> str:
+        # 反代子路径下 request.path 不含挂载前缀，表单回跳需要补齐。
+        path = request.full_path if request.query_string else request.path
+        script_root = (request.script_root or "").rstrip("/")
+        if script_root and path != script_root and not path.startswith(f"{script_root}/"):
+            return f"{script_root}{path}"
+        return path
+
     def require_admin_access() -> Response | None:
         if not is_admin():
             flash("仅管理员可访问。", "error")
@@ -6740,7 +6748,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         if endpoint not in public_endpoints and g.current_user is None:
             if request.path.startswith("/api/"):
                 return jsonify({"ok": False, "message": "请先登录。"}), 401
-            next_url = request.full_path if request.query_string else request.path
+            next_url = current_local_path()
             return redirect(f"{url_for('login')}?{urllib_parse.urlencode({'next': next_url})}")
         g.projects = fetch_projects()
         g.current_project = fetch_current_project()
@@ -6778,6 +6786,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             "allowed_status_transitions": allowed_status_transitions,
             "can_edit_bug_platform": can_edit_bug_platform,
             "notification_category_label": notification_category_label,
+            "current_local_path": current_local_path,
             "is_admin": is_admin(),
         }
 

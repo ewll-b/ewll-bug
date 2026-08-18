@@ -51,7 +51,7 @@
                         <td>
                             <form class="inline-status-form" method="post" action="{{ url_for('update_bug', bug_id=item.id) }}">
                                 <input type="hidden" name="action" value="change_status">
-                                <input type="hidden" name="redirect_to" value="{{ request.full_path if request.query_string else request.path }}">
+                                <input type="hidden" name="redirect_to" value="{{ current_local_path() }}">
                                 <details class="status-dropdown">
                                     <summary class="status-select status-{{ item.status }}">
                                         <span>{{ status_labels[item.status] }}</span>

@@ -205,7 +205,7 @@
                             {% if can_edit_bug_platform(bug) %}
                                 <form class="inline-platform-form" method="post" action="{{ url_for('update_bug', bug_id=bug.id) }}">
                                     <input type="hidden" name="action" value="change_platform">
-                                    <input type="hidden" name="redirect_to" value="{{ request.full_path if request.query_string else request.path }}">
+                                    <input type="hidden" name="redirect_to" value="{{ current_local_path() }}">
                                     <details class="platform-dropdown">
                                         <summary class="platform-select" data-platform-value="{{ bug.platform or '' }}">
                                             <span>{{ bug.platform or "请选择" }}</span>
@@ -228,7 +228,7 @@
                         <td>
                             <form class="inline-status-form" method="post" action="{{ url_for('update_bug', bug_id=bug.id) }}">
                                 <input type="hidden" name="action" value="change_status">
-                                <input type="hidden" name="redirect_to" value="{{ request.full_path if request.query_string else request.path }}">
+                                <input type="hidden" name="redirect_to" value="{{ current_local_path() }}">
                                 <details class="status-dropdown">
                                     <summary class="status-select status-{{ bug.status }}">
                                         <span>{{ status_labels[bug.status] }}</span>
