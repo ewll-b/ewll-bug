@@ -712,6 +712,7 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("我的待办".encode("utf-8"), response.data)
         self.assertIn("范围：全部项目".encode("utf-8"), response.data)
+        self.assertIn('class="btn btn-secondary mini" href="/todos"'.encode("utf-8"), response.data)
         self.assertIn("商家工作台".encode("utf-8"), response.data)
         self.assertIn('<th class="bug-col-platform">端</th>'.encode("utf-8"), response.data)
         self.assertIn("platform-chip".encode("utf-8"), response.data)
@@ -1028,6 +1029,7 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn('href="/for-test/bugs"'.encode("utf-8"), page.data)
         self.assertIn('href="/for-test/todos"'.encode("utf-8"), page.data)
+        self.assertIn('class="btn btn-secondary mini" href="/for-test/todos"'.encode("utf-8"), page.data)
         self.assertIn('name="redirect_to" value="/for-test/todos"'.encode("utf-8"), page.data)
 
         response = self.client.post(

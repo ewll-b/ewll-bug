@@ -8,6 +8,8 @@
         <div class="list-header single-row-header">
             <div class="page-title-row">
                 <h2 class="list-page-title">我的待办</h2>
+                {# 刷新当前路径，确保代理前缀下仍回到本页。 #}
+                <a class="btn btn-secondary mini" href="{{ current_local_path() }}">刷新</a>
             </div>
             <div class="head-stats list-stats">
                 <span>当前待办：{{ summary.my_todo_count }}</span>
