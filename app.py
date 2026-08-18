@@ -3754,6 +3754,25 @@ def create_app(test_config: dict | None = None) -> Flask:
         first_project = get_db().execute("SELECT id FROM projects ORDER BY id LIMIT 1").fetchone()
         return int(first_project["id"]) if first_project else None
 
+    def default_project_id_for_user(user_id: int) -> int | None:
+        # 登录后优先进入有待办的项目，避免用户误以为待办数据丢失。
+        todo_project = get_db().execute(
+            f"""
+            SELECT project_id
+            FROM bugs
+            WHERE assignee_id = ?
+              AND status IN ({','.join('?' for _ in TODO_STATUS_CODES)})
+            GROUP BY project_id
+            ORDER BY MAX(datetime(updated_at)) DESC, project_id ASC
+            LIMIT 1
+            """,
+            (user_id, *TODO_STATUS_CODES),
+        ).fetchone()
+        if todo_project is not None:
+            return int(todo_project["project_id"])
+        first_project = get_db().execute("SELECT id FROM projects ORDER BY id LIMIT 1").fetchone()
+        return int(first_project["id"]) if first_project else None
+
     def set_current_project(project_id: int) -> None:
         session["project_id"] = project_id
 
@@ -5675,11 +5694,11 @@ def create_app(test_config: dict | None = None) -> Flask:
             JOIN projects ON bugs.project_id = projects.id
             LEFT JOIN users assignee ON bugs.assignee_id = assignee.id
             LEFT JOIN users creator ON bugs.creator_id = creator.id
-            WHERE bugs.project_id = ? AND bugs.assignee_id = ?
+            WHERE bugs.assignee_id = ?
                 AND bugs.status IN ('open', 'in_progress', 'pending_verification')
-            ORDER BY bugs.updated_at DESC
+            ORDER BY bugs.updated_at DESC, bugs.id DESC
             """,
-            (current_project_id(), g.current_user["id"]),
+            (g.current_user["id"],),
         ).fetchall()
 
     def fetch_bug(bug_id: int) -> sqlite3.Row | None:
@@ -6548,8 +6567,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                 flash("账号或密码错误。", "error")
             else:
                 session["user_id"] = user["id"]
-                first_project = fetch_projects()[0]
-                session["project_id"] = first_project["id"]
+                default_project_id = default_project_id_for_user(int(user["id"]))
+                if default_project_id is not None:
+                    session["project_id"] = default_project_id
                 flash(f"已登录为 {user['name']}。", "success")
                 return redirect(next_url)
         return render_template("login.html", login_next=next_url)
@@ -6593,7 +6613,10 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.route("/todos")
     def my_todo_page() -> str:
-        return render_template("my_todos.html", my_todos=fetch_my_todos(), summary=fetch_summary())
+        my_todos = fetch_my_todos()
+        summary = fetch_summary()
+        summary["my_todo_count"] = len(my_todos)
+        return render_template("my_todos.html", my_todos=my_todos, summary=summary)
 
     @app.route("/notifications")
     def notification_center() -> str:

@@ -11,7 +11,7 @@
             </div>
             <div class="head-stats list-stats">
                 <span>当前待办：{{ summary.my_todo_count }}</span>
-                <span>项目：{{ current_project.name if current_project else '' }}</span>
+                <span>范围：全部项目</span>
             </div>
         </div>
     </div>
@@ -21,6 +21,7 @@
             <thead>
                 <tr>
                     <th class="bug-col-no">编号</th>
+                    <th class="bug-col-project">项目</th>
                     <th class="bug-col-title">标题</th>
                     <th class="bug-col-version">版本</th>
                     <th class="bug-col-platform">端</th>
@@ -34,6 +35,7 @@
                 {% for item in my_todos %}
                     <tr>
                         <td>{{ format_bug_no(item.bug_no or item.id) }}</td>
+                        <td>{{ item.project_name }}</td>
                         <td class="bug-title-col">
                             <a class="table-link bug-title-link" href="{{ url_for('bug_detail', bug_id=item.id) }}" title="{{ item.title }}">{{ item.title }}</a>
                         </td>
@@ -68,7 +70,7 @@
                     </tr>
                 {% else %}
                     <tr>
-                        <td colspan="8" class="empty-row">当前没有待办</td>
+                        <td colspan="9" class="empty-row">当前没有待办</td>
                     </tr>
                 {% endfor %}
             </tbody>
