@@ -92,6 +92,77 @@ class BugPlatformTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def create_zhengjingpei_user(self) -> int:
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO users (name, role, role_code, account_type, username, password, email, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "郑敬佩",
+                    "H5开发",
+                    "h5_developer",
+                    "member",
+                    "zhengjingpei",
+                    "zhengjingpei123",
+                    "zhengjingpei@alvinsclub.ai",
+                    "2026-08-18 10:00:00",
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def insert_bug_for_assignee(
+        self,
+        assignee_id: int,
+        *,
+        bug_no: str,
+        title: str,
+        status: str,
+        project_id: int = 1,
+        requirement_id: int | None = None,
+        case_id: int | None = None,
+    ) -> int:
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            creator = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
+            cursor = conn.execute(
+                """
+                INSERT INTO bugs (
+                    bug_no, title, project_id, version, module, platform, severity, priority, status,
+                    assignee_id, creator_id, reporter, requirement_id, case_id, environment, description,
+                    expected_result, actual_result, resolution_note, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    bug_no,
+                    title,
+                    project_id,
+                    "1.1.1",
+                    "WEB",
+                    "WEB",
+                    "高",
+                    "高",
+                    status,
+                    assignee_id,
+                    creator["id"],
+                    "李婷",
+                    requirement_id,
+                    case_id,
+                    "测试环境",
+                    f"{title} 描述",
+                    f"{title} 期望",
+                    f"{title} 实际",
+                    "",
+                    "2026-08-18 10:00:00",
+                    "2026-08-18 10:00:00",
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
     def build_excel_file(self) -> io.BytesIO:
         workbook = openpyxl.Workbook()
         sheet = workbook.active
@@ -718,6 +789,138 @@ class BugPlatformTestCase(unittest.TestCase):
 
         with self.client.session_transaction() as session:
             self.assertEqual(session["project_id"], 2)
+
+    def test_zhengjingpei_todos_api_requires_login(self) -> None:
+        response = self.client.get("/api/todos/zhengjingpei")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["message"], "请先登录。")
+
+    def test_zhengjingpei_todos_api_rejects_other_members(self) -> None:
+        self.create_zhengjingpei_user()
+        self.login_as("lit", "123456")
+
+        response = self.client.get("/api/todos/zhengjingpei")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["message"], "无权查看郑敬佩的待办。")
+
+    def test_zhengjingpei_todos_api_returns_todos_with_detail(self) -> None:
+        assignee_id = self.create_zhengjingpei_user()
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO requirements (
+                    project_id, code, title, version, status, priority, description,
+                    acceptance_criteria, requirement_doc_link, design_doc_link, creator_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    "REQ-ZJP-001",
+                    "郑敬佩接口测试需求",
+                    "1.1.1",
+                    "doing",
+                    "高",
+                    "需求描述",
+                    "验收标准",
+                    "",
+                    "",
+                    1,
+                    "2026-08-18 10:00:00",
+                    "2026-08-18 10:00:00",
+                ),
+            )
+            requirement_id = int(cursor.lastrowid)
+            cursor = conn.execute(
+                """
+                INSERT INTO test_cases (
+                    case_no, title, project_id, version, module_name, steps, expected_result,
+                    source_type, execute_status, creator_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "TC-ZJP-001",
+                    "郑敬佩接口测试用例",
+                    1,
+                    "1.1.1",
+                    "WEB",
+                    "打开接口",
+                    "返回 JSON",
+                    "手动",
+                    "未执行",
+                    1,
+                    "2026-08-18 10:00:00",
+                    "2026-08-18 10:00:00",
+                ),
+            )
+            case_id = int(cursor.lastrowid)
+            conn.commit()
+        bug_id = self.insert_bug_for_assignee(
+            assignee_id,
+            bug_no="ZJP-001",
+            title="郑敬佩打开状态待办",
+            status="open",
+            requirement_id=requirement_id,
+            case_id=case_id,
+        )
+        self.insert_bug_for_assignee(assignee_id, bug_no="ZJP-CLOSED", title="郑敬佩已关闭缺陷", status="closed")
+        self.login_as("admin", "admin123")
+
+        response = self.client.get("/api/todos/zhengjingpei")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["assignee"]["username"], "zhengjingpei")
+        self.assertEqual(payload["count"], 1)
+        todo = payload["todos"][0]
+        self.assertEqual(todo["id"], bug_id)
+        self.assertEqual(todo["bug_no"], "ZJP-001")
+        self.assertEqual(todo["status"], "open")
+        self.assertEqual(todo["status_label"], "已打开")
+        self.assertEqual(todo["project"]["name"], "零售增长平台")
+        self.assertEqual(todo["detail"]["description"], "郑敬佩打开状态待办 描述")
+        self.assertEqual(todo["detail"]["requirement"]["code"], "REQ-ZJP-001")
+        self.assertEqual(todo["detail"]["case"]["case_no"], "TC-ZJP-001")
+        self.assertEqual(todo["detail"]["url"], f"/bugs/{bug_id}")
+
+    def test_zhengjingpei_todos_api_filters_status(self) -> None:
+        assignee_id = self.create_zhengjingpei_user()
+        self.insert_bug_for_assignee(assignee_id, bug_no="ZJP-OPEN", title="郑敬佩打开待办", status="open")
+        self.insert_bug_for_assignee(
+            assignee_id,
+            bug_no="ZJP-PENDING",
+            title="郑敬佩待验证待办",
+            status="pending_verification",
+        )
+        self.login_as("zhengjingpei", "zhengjingpei123")
+
+        response = self.client.get("/api/todos/zhengjingpei?status=待验证")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["filters"]["statuses"], [{"code": "pending_verification", "label": "待验证"}])
+        self.assertEqual(payload["todos"][0]["title"], "郑敬佩待验证待办")
+
+        response = self.client.get("/api/todos/zhengjingpei?status=open,pending_verification")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["count"], 2)
+
+    def test_zhengjingpei_todos_api_rejects_invalid_status(self) -> None:
+        self.create_zhengjingpei_user()
+        self.login_as("zhengjingpei", "zhengjingpei123")
+
+        response = self.client.get("/api/todos/zhengjingpei?status=closed")
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.get_json()
+        self.assertEqual(payload["message"], "待办状态参数无效。")
+        self.assertEqual(payload["invalid_statuses"], ["closed"])
 
     def test_my_todos_status_change_to_closed_stays_on_todos(self) -> None:
         self.login_as("lit", "123456")

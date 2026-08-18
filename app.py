@@ -1234,6 +1234,18 @@ def create_app(test_config: dict | None = None) -> Flask:
     def fetch_user(user_id: int) -> sqlite3.Row | None:
         return get_db().execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
+    def fetch_user_by_identity(identity: str) -> sqlite3.Row | None:
+        return get_db().execute(
+            """
+            SELECT *
+            FROM users
+            WHERE username = ? OR name = ?
+            ORDER BY id
+            LIMIT 1
+            """,
+            (identity, identity),
+        ).fetchone()
+
     def fetch_bug_assignee_user(user_id: object) -> sqlite3.Row | None:
         try:
             target_user_id = int(user_id)
@@ -5701,6 +5713,106 @@ def create_app(test_config: dict | None = None) -> Flask:
             (g.current_user["id"],),
         ).fetchall()
 
+    def normalize_todo_status_filters(raw_values: list[str]) -> tuple[list[str], list[str]]:
+        status_aliases = {label: code for code, label in STATUS_OPTIONS}
+        status_aliases.update({code: code for code, _label in STATUS_OPTIONS})
+        values = []
+        for raw_value in raw_values:
+            values.extend(part.strip() for part in str(raw_value or "").split(","))
+        if not any(values):
+            return list(TODO_STATUS_CODES), []
+        statuses: list[str] = []
+        invalid_values: list[str] = []
+        for value in values:
+            if not value:
+                continue
+            status = status_aliases.get(value) or status_aliases.get(value.lower())
+            if status not in TODO_STATUS_CODES:
+                invalid_values.append(value)
+                continue
+            if status not in statuses:
+                statuses.append(status)
+        return statuses, invalid_values
+
+    def fetch_user_todos_with_detail(user_id: int, statuses: list[str]) -> list[sqlite3.Row]:
+        placeholders = ",".join("?" for _ in statuses)
+        return get_db().execute(
+            f"""
+            SELECT
+                bugs.*,
+                projects.name AS project_name,
+                assignee.name AS assignee_name,
+                assignee.username AS assignee_username,
+                creator.name AS creator_name,
+                creator.username AS creator_username,
+                requirements.code AS requirement_code,
+                requirements.title AS requirement_title,
+                test_cases.case_no AS case_no,
+                test_cases.title AS case_title
+            FROM bugs
+            JOIN projects ON bugs.project_id = projects.id
+            LEFT JOIN users assignee ON bugs.assignee_id = assignee.id
+            LEFT JOIN users creator ON bugs.creator_id = creator.id
+            LEFT JOIN requirements ON bugs.requirement_id = requirements.id
+            LEFT JOIN test_cases ON bugs.case_id = test_cases.id
+            WHERE bugs.assignee_id = ?
+              AND bugs.status IN ({placeholders})
+            ORDER BY bugs.updated_at DESC, bugs.id DESC
+            """,
+            (user_id, *statuses),
+        ).fetchall()
+
+    def serialize_todo_bug(row: sqlite3.Row) -> dict[str, object]:
+        bug_id = int(row["id"])
+        # JSON 接口同时返回摘要和详情，便于外部系统直接消费。
+        return {
+            "id": bug_id,
+            "bug_no": format_bug_no(row["bug_no"] or bug_id),
+            "title": row["title"] or "",
+            "project": {
+                "id": int(row["project_id"]),
+                "name": row["project_name"] or "",
+            },
+            "version": row["version"] or "",
+            "module": row["module"] or "",
+            "platform": row["platform"] or "",
+            "severity": row["severity"] or "",
+            "priority": row["priority"] or "",
+            "status": row["status"] or "",
+            "status_label": STATUS_LABELS.get(str(row["status"] or ""), str(row["status"] or "")),
+            "assignee": {
+                "id": int(row["assignee_id"] or 0),
+                "name": row["assignee_name"] or "",
+                "username": row["assignee_username"] or "",
+            },
+            "creator": {
+                "id": int(row["creator_id"] or 0),
+                "name": row["creator_name"] or "",
+                "username": row["creator_username"] or "",
+            },
+            "reporter": row["reporter"] or "",
+            "environment": row["environment"] or "",
+            "created_at": row["created_at"] or "",
+            "updated_at": row["updated_at"] or "",
+            "detail": {
+                "description": row["description"] or "",
+                "expected_result": row["expected_result"] or "",
+                "actual_result": row["actual_result"] or "",
+                "resolution_note": row["resolution_note"] or "",
+                "requirement": {
+                    "id": int(row["requirement_id"]) if row["requirement_id"] else None,
+                    "code": row["requirement_code"] or "",
+                    "title": row["requirement_title"] or "",
+                },
+                "case": {
+                    "id": int(row["case_id"]) if row["case_id"] else None,
+                    "case_no": row["case_no"] or "",
+                    "title": row["case_title"] or "",
+                },
+                "url": url_for("bug_detail", bug_id=bug_id),
+            },
+        }
+
     def fetch_bug(bug_id: int) -> sqlite3.Row | None:
         return get_db().execute(
             """
@@ -6515,6 +6627,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             g.current_user = fetch_user(int(user_id))
         endpoint = request.endpoint or ""
         if endpoint not in {"login", "static"} and g.current_user is None:
+            if request.path.startswith("/api/"):
+                return jsonify({"ok": False, "message": "请先登录。"}), 401
             next_url = request.full_path if request.query_string else request.path
             return redirect(f"{url_for('login')}?{urllib_parse.urlencode({'next': next_url})}")
         g.projects = fetch_projects()
@@ -6617,6 +6731,45 @@ def create_app(test_config: dict | None = None) -> Flask:
         summary = fetch_summary()
         summary["my_todo_count"] = len(my_todos)
         return render_template("my_todos.html", my_todos=my_todos, summary=summary)
+
+    @app.route("/api/todos/zhengjingpei")
+    def zhengjingpei_todos_api() -> Response | tuple[Response, int]:
+        target_user = fetch_user_by_identity("zhengjingpei") or fetch_user_by_identity("郑敬佩")
+        if target_user is None:
+            return jsonify({"ok": False, "message": "未找到郑敬佩账号。"}), 404
+        current_username = str(g.current_user["username"] or "").strip().lower()
+        if not is_admin() and current_username != "zhengjingpei":
+            return jsonify({"ok": False, "message": "无权查看郑敬佩的待办。"}), 403
+        statuses, invalid_values = normalize_todo_status_filters(request.args.getlist("status"))
+        if invalid_values:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "message": "待办状态参数无效。",
+                        "invalid_statuses": invalid_values,
+                        "valid_statuses": [{"code": code, "label": STATUS_LABELS[code]} for code in TODO_STATUS_CODES],
+                    }
+                ),
+                400,
+            )
+        rows = fetch_user_todos_with_detail(int(target_user["id"]), statuses)
+        return jsonify(
+            {
+                "ok": True,
+                "assignee": {
+                    "id": int(target_user["id"]),
+                    "name": target_user["name"] or "",
+                    "username": target_user["username"] or "",
+                    "role": target_user["role"] or "",
+                },
+                "filters": {
+                    "statuses": [{"code": code, "label": STATUS_LABELS[code]} for code in statuses],
+                },
+                "count": len(rows),
+                "todos": [serialize_todo_bug(row) for row in rows],
+            }
+        )
 
     @app.route("/notifications")
     def notification_center() -> str:
