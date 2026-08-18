@@ -6626,7 +6626,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         if user_id:
             g.current_user = fetch_user(int(user_id))
         endpoint = request.endpoint or ""
-        if endpoint not in {"login", "static"} and g.current_user is None:
+        # 待办 JSON 接口供外部系统拉取，按需求开放匿名访问。
+        public_endpoints = {"login", "static", "zhengjingpei_todos_api"}
+        if endpoint not in public_endpoints and g.current_user is None:
             if request.path.startswith("/api/"):
                 return jsonify({"ok": False, "message": "请先登录。"}), 401
             next_url = request.full_path if request.query_string else request.path
@@ -6737,9 +6739,6 @@ def create_app(test_config: dict | None = None) -> Flask:
         target_user = fetch_user_by_identity("zhengjingpei") or fetch_user_by_identity("郑敬佩")
         if target_user is None:
             return jsonify({"ok": False, "message": "未找到郑敬佩账号。"}), 404
-        current_username = str(g.current_user["username"] or "").strip().lower()
-        if not is_admin() and current_username != "zhengjingpei":
-            return jsonify({"ok": False, "message": "无权查看郑敬佩的待办。"}), 403
         statuses, invalid_values = normalize_todo_status_filters(request.args.getlist("status"))
         if invalid_values:
             return (

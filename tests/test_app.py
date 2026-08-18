@@ -790,20 +790,27 @@ class BugPlatformTestCase(unittest.TestCase):
         with self.client.session_transaction() as session:
             self.assertEqual(session["project_id"], 2)
 
-    def test_zhengjingpei_todos_api_requires_login(self) -> None:
+    def test_zhengjingpei_todos_api_allows_anonymous_access(self) -> None:
+        assignee_id = self.create_zhengjingpei_user()
+        self.insert_bug_for_assignee(assignee_id, bug_no="ZJP-PUBLIC", title="郑敬佩公开接口待办", status="open")
+
         response = self.client.get("/api/todos/zhengjingpei")
 
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.get_json()["message"], "请先登录。")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["todos"][0]["title"], "郑敬佩公开接口待办")
 
-    def test_zhengjingpei_todos_api_rejects_other_members(self) -> None:
-        self.create_zhengjingpei_user()
+    def test_zhengjingpei_todos_api_allows_other_members(self) -> None:
+        assignee_id = self.create_zhengjingpei_user()
+        self.insert_bug_for_assignee(assignee_id, bug_no="ZJP-MEMBER", title="郑敬佩成员可查待办", status="open")
         self.login_as("lit", "123456")
 
         response = self.client.get("/api/todos/zhengjingpei")
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.get_json()["message"], "无权查看郑敬佩的待办。")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["count"], 1)
 
     def test_zhengjingpei_todos_api_returns_todos_with_detail(self) -> None:
         assignee_id = self.create_zhengjingpei_user()
