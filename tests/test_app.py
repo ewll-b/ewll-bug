@@ -873,6 +873,31 @@ class BugPlatformTestCase(unittest.TestCase):
             requirement_id=requirement_id,
             case_id=case_id,
         )
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.execute(
+                """
+                INSERT INTO bug_comments (bug_id, user_id, parent_id, author_name, content, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (bug_id, 1, None, "李婷", "接口详情评论", "2026-08-18 10:10:00", "2026-08-18 10:10:00"),
+            )
+            conn.execute(
+                """
+                INSERT INTO bug_history (
+                    bug_id, action, detail, operator_name, environment_snapshot, status_snapshot, assignee_snapshot, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (bug_id, "更新状态", "接口详情历史", "李婷", "测试环境", "open", "郑敬佩", "2026-08-18 10:11:00"),
+            )
+            conn.execute(
+                """
+                INSERT INTO bug_attachments (bug_id, filename, stored_name, content_type, source_field, file_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (bug_id, "detail.png", "detail.png", "image/png", "attachments", "/tmp/detail.png", "2026-08-18 10:12:00"),
+            )
+            conn.commit()
         self.insert_bug_for_assignee(assignee_id, bug_no="ZJP-CLOSED", title="郑敬佩已关闭缺陷", status="closed")
         self.login_as("admin", "admin123")
 
@@ -893,6 +918,14 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(todo["detail"]["requirement"]["code"], "REQ-ZJP-001")
         self.assertEqual(todo["detail"]["case"]["case_no"], "TC-ZJP-001")
         self.assertEqual(todo["detail"]["url"], f"/bugs/{bug_id}")
+        detail = payload["todo_details"][0]
+        self.assertEqual(detail["id"], bug_id)
+        self.assertEqual(detail["description"], "郑敬佩打开状态待办 描述")
+        self.assertEqual(detail["requirement"]["code"], "REQ-ZJP-001")
+        self.assertEqual(detail["case"]["case_no"], "TC-ZJP-001")
+        self.assertEqual(detail["comments"][0]["content"], "接口详情评论")
+        self.assertEqual(detail["history"][0]["detail"], "接口详情历史")
+        self.assertEqual(detail["attachments"][0]["filename"], "detail.png")
 
     def test_zhengjingpei_todos_api_filters_status(self) -> None:
         assignee_id = self.create_zhengjingpei_user()
@@ -928,6 +961,35 @@ class BugPlatformTestCase(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["message"], "待办状态参数无效。")
         self.assertEqual(payload["invalid_statuses"], ["closed"])
+
+    def test_zhengjingpei_todo_status_api_updates_status(self) -> None:
+        assignee_id = self.create_zhengjingpei_user()
+        bug_id = self.insert_bug_for_assignee(
+            assignee_id,
+            bug_no="ZJP-STATUS",
+            title="郑敬佩状态接口待办",
+            status="open",
+        )
+
+        response = self.client.post(
+            f"/api/todos/zhengjingpei/{bug_id}/status",
+            json={"status": "处理中", "note": "接口切换处理中", "operator": "外部系统"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["previous_status"]["code"], "open")
+        self.assertEqual(payload["current_status"]["code"], "in_progress")
+        self.assertEqual(payload["todo_detail"]["status"], "in_progress")
+        self.assertEqual(payload["todo_detail"]["history"][0]["operator_name"], "外部系统")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            bug = conn.execute("SELECT status, resolution_note FROM bugs WHERE id = ?", (bug_id,)).fetchone()
+            history = conn.execute("SELECT detail FROM bug_history WHERE bug_id = ? ORDER BY id DESC LIMIT 1", (bug_id,)).fetchone()
+        self.assertEqual(bug["status"], "in_progress")
+        self.assertEqual(bug["resolution_note"], "接口切换处理中")
+        self.assertIn("接口切换处理中", history["detail"])
 
     def test_my_todos_status_change_to_closed_stays_on_todos(self) -> None:
         self.login_as("lit", "123456")

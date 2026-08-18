@@ -5734,6 +5734,13 @@ def create_app(test_config: dict | None = None) -> Flask:
                 statuses.append(status)
         return statuses, invalid_values
 
+    def normalize_bug_status_value(raw_value: object) -> str | None:
+        # 写接口同时兼容中文状态名和内部状态码。
+        status_aliases = {label: code for code, label in STATUS_OPTIONS}
+        status_aliases.update({code: code for code, _label in STATUS_OPTIONS})
+        value = str(raw_value or "").strip()
+        return status_aliases.get(value) or status_aliases.get(value.lower())
+
     def fetch_user_todos_with_detail(user_id: int, statuses: list[str]) -> list[sqlite3.Row]:
         placeholders = ",".join("?" for _ in statuses)
         return get_db().execute(
@@ -5762,9 +5769,75 @@ def create_app(test_config: dict | None = None) -> Flask:
             (user_id, *statuses),
         ).fetchall()
 
-    def serialize_todo_bug(row: sqlite3.Row) -> dict[str, object]:
+    def fetch_todo_detail_bug(bug_id: int) -> sqlite3.Row | None:
+        return get_db().execute(
+            """
+            SELECT
+                bugs.*,
+                projects.name AS project_name,
+                assignee.name AS assignee_name,
+                assignee.username AS assignee_username,
+                creator.name AS creator_name,
+                creator.username AS creator_username,
+                requirements.code AS requirement_code,
+                requirements.title AS requirement_title,
+                test_cases.case_no AS case_no,
+                test_cases.title AS case_title
+            FROM bugs
+            JOIN projects ON bugs.project_id = projects.id
+            LEFT JOIN users assignee ON bugs.assignee_id = assignee.id
+            LEFT JOIN users creator ON bugs.creator_id = creator.id
+            LEFT JOIN requirements ON bugs.requirement_id = requirements.id
+            LEFT JOIN test_cases ON bugs.case_id = test_cases.id
+            WHERE bugs.id = ?
+            """,
+            (bug_id,),
+        ).fetchone()
+
+    def serialize_todo_attachment(attachment: sqlite3.Row) -> dict[str, object]:
+        attachment_id = int(attachment["id"])
+        return {
+            "id": attachment_id,
+            "filename": attachment["filename"] or "",
+            "content_type": attachment["content_type"] or "",
+            "source_field": attachment["source_field"] or "",
+            "url": url_for("view_attachment", attachment_id=attachment_id),
+            "created_at": attachment["created_at"] or "",
+        }
+
+    def serialize_todo_comment(comment: sqlite3.Row) -> dict[str, object]:
+        return {
+            "id": int(comment["id"]),
+            "parent_id": int(comment["parent_id"]) if comment["parent_id"] else None,
+            "user_id": int(comment["user_id"]),
+            "author_name": comment["commenter_name"] or comment["author_name"] or "",
+            "author_role": comment["commenter_role"] or "",
+            "content": comment["content"] or "",
+            "created_at": comment["created_at"] or "",
+            "updated_at": comment["updated_at"] or "",
+        }
+
+    def serialize_todo_history(history: sqlite3.Row) -> dict[str, object]:
+        return {
+            "id": int(history["id"]),
+            "action": history["action"] or "",
+            "detail": history["detail"] or "",
+            "operator_name": history["operator_name"] or "",
+            "environment_snapshot": history["environment_snapshot"] or "",
+            "status_snapshot": history["status_snapshot"] or "",
+            "status_snapshot_label": STATUS_LABELS.get(str(history["status_snapshot"] or ""), str(history["status_snapshot"] or "")),
+            "assignee_snapshot": history["assignee_snapshot"] or "",
+            "created_at": history["created_at"] or "",
+        }
+
+    def serialize_todo_detail(
+        row: sqlite3.Row,
+        comments: list[sqlite3.Row] | None = None,
+        history: list[sqlite3.Row] | None = None,
+        attachments: list[sqlite3.Row] | None = None,
+    ) -> dict[str, object]:
         bug_id = int(row["id"])
-        # JSON 接口同时返回摘要和详情，便于外部系统直接消费。
+        # 详情独立序列化，读取接口和状态变更接口返回同一份明细结构。
         return {
             "id": bug_id,
             "bug_no": format_bug_no(row["bug_no"] or bug_id),
@@ -5794,24 +5867,58 @@ def create_app(test_config: dict | None = None) -> Flask:
             "environment": row["environment"] or "",
             "created_at": row["created_at"] or "",
             "updated_at": row["updated_at"] or "",
-            "detail": {
-                "description": row["description"] or "",
-                "expected_result": row["expected_result"] or "",
-                "actual_result": row["actual_result"] or "",
-                "resolution_note": row["resolution_note"] or "",
-                "requirement": {
-                    "id": int(row["requirement_id"]) if row["requirement_id"] else None,
-                    "code": row["requirement_code"] or "",
-                    "title": row["requirement_title"] or "",
-                },
-                "case": {
-                    "id": int(row["case_id"]) if row["case_id"] else None,
-                    "case_no": row["case_no"] or "",
-                    "title": row["case_title"] or "",
-                },
-                "url": url_for("bug_detail", bug_id=bug_id),
+            "description": row["description"] or "",
+            "expected_result": row["expected_result"] or "",
+            "actual_result": row["actual_result"] or "",
+            "resolution_note": row["resolution_note"] or "",
+            "requirement": {
+                "id": int(row["requirement_id"]) if row["requirement_id"] else None,
+                "code": row["requirement_code"] or "",
+                "title": row["requirement_title"] or "",
             },
+            "case": {
+                "id": int(row["case_id"]) if row["case_id"] else None,
+                "case_no": row["case_no"] or "",
+                "title": row["case_title"] or "",
+            },
+            "comments": [serialize_todo_comment(item) for item in comments or []],
+            "history": [serialize_todo_history(item) for item in history or []],
+            "attachments": [serialize_todo_attachment(item) for item in attachments or []],
+            "url": url_for("bug_detail", bug_id=bug_id),
         }
+
+    def serialize_todo_bug(row: sqlite3.Row) -> dict[str, object]:
+        detail = serialize_todo_detail(row)
+        # 保留 todos[].detail 兼容旧调用方，同时顶层返回 todo_details。
+        return {
+            "id": detail["id"],
+            "bug_no": detail["bug_no"],
+            "title": detail["title"],
+            "project": detail["project"],
+            "version": detail["version"],
+            "module": detail["module"],
+            "platform": detail["platform"],
+            "severity": detail["severity"],
+            "priority": detail["priority"],
+            "status": detail["status"],
+            "status_label": detail["status_label"],
+            "assignee": detail["assignee"],
+            "creator": detail["creator"],
+            "reporter": detail["reporter"],
+            "environment": detail["environment"],
+            "created_at": detail["created_at"],
+            "updated_at": detail["updated_at"],
+            "detail": detail,
+        }
+
+    def serialize_todo_detail_with_relations(row: sqlite3.Row) -> dict[str, object]:
+        bug_id = int(row["id"])
+        return serialize_todo_detail(
+            row,
+            comments=fetch_bug_comments(bug_id),
+            history=fetch_bug_history(bug_id),
+            attachments=fetch_bug_attachments(bug_id),
+        )
 
     def fetch_bug(bug_id: int) -> sqlite3.Row | None:
         return get_db().execute(
@@ -6390,6 +6497,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         operator_name: str,
         note: str = "",
         assignee_id: int | None = None,
+        selected_status: str | None = None,
     ) -> tuple[str, int, int | None, str, str]:
         new_status = bug["status"]
         new_assignee_id = int(bug["assignee_id"])
@@ -6431,28 +6539,29 @@ def create_app(test_config: dict | None = None) -> Flask:
             target_name = target_user["name"]
             detail = f"{operator_name} 转交给 {target_name}"
         elif action == "change_status":
-            selected_status = request.form.get("status", "").strip()
-            if selected_status not in STATUS_LABELS:
+            # 页面表单从 request.form 读取，JSON 接口直接传入目标状态。
+            target_status = (selected_status if selected_status is not None else request.form.get("status", "")).strip()
+            if target_status not in STATUS_LABELS:
                 raise ValueError("请选择有效状态。")
-            if selected_status not in allowed_status_transitions(bug["status"]):
+            if target_status not in allowed_status_transitions(bug["status"]):
                 raise ValueError("当前状态不支持直接切换到该选项。")
             action_label = "更新状态"
             previous_status = STATUS_LABELS.get(bug["status"], bug["status"])
-            new_status = selected_status
-            if selected_status in {"open", "in_progress"} and str(bug["status"] or "") == "pending_verification":
+            new_status = target_status
+            if target_status in {"open", "in_progress"} and str(bug["status"] or "") == "pending_verification":
                 new_assignee_id = int(bug["previous_assignee_id"] or bug["assignee_id"])
                 reject_user = fetch_user(new_assignee_id)
                 reject_name = reject_user["name"] if reject_user else "原处理人"
-                detail = f"{operator_name} 将状态更新为 {STATUS_LABELS[selected_status]}，系统自动回到 {reject_name} 的待办"
-            elif selected_status == "pending_verification":
+                detail = f"{operator_name} 将状态更新为 {STATUS_LABELS[target_status]}，系统自动回到 {reject_name} 的待办"
+            elif target_status == "pending_verification":
                 new_previous_assignee_id = bug["assignee_id"]
                 new_assignee_id = int(bug["creator_id"] or bug["assignee_id"])
                 detail = f"{operator_name} 将状态更新为待验证，系统自动回到创建人 {bug['creator_name']} 的待办"
-            elif selected_status == "closed":
+            elif target_status == "closed":
                 new_assignee_id = int(bug["creator_id"] or bug["assignee_id"])
                 detail = f"{operator_name} 将状态更新为已关闭"
             else:
-                detail = f"{operator_name} 将状态从 {previous_status} 更新为 {STATUS_LABELS[selected_status]}"
+                detail = f"{operator_name} 将状态从 {previous_status} 更新为 {STATUS_LABELS[target_status]}"
 
         if note:
             detail += f"；说明：{note}"
@@ -6626,8 +6735,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         if user_id:
             g.current_user = fetch_user(int(user_id))
         endpoint = request.endpoint or ""
-        # 待办 JSON 接口供外部系统拉取，按需求开放匿名访问。
-        public_endpoints = {"login", "static", "zhengjingpei_todos_api"}
+        # 郑敬佩待办 JSON 接口按需求开放匿名访问。
+        public_endpoints = {"login", "static", "zhengjingpei_todos_api", "zhengjingpei_todo_status_api"}
         if endpoint not in public_endpoints and g.current_user is None:
             if request.path.startswith("/api/"):
                 return jsonify({"ok": False, "message": "请先登录。"}), 401
@@ -6753,6 +6862,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 400,
             )
         rows = fetch_user_todos_with_detail(int(target_user["id"]), statuses)
+        todo_details = [serialize_todo_detail_with_relations(row) for row in rows]
         return jsonify(
             {
                 "ok": True,
@@ -6767,6 +6877,91 @@ def create_app(test_config: dict | None = None) -> Flask:
                 },
                 "count": len(rows),
                 "todos": [serialize_todo_bug(row) for row in rows],
+                "todo_details": todo_details,
+            }
+        )
+
+    @app.route("/api/todos/zhengjingpei/<int:bug_id>/status", methods=["POST"])
+    def zhengjingpei_todo_status_api(bug_id: int) -> Response | tuple[Response, int]:
+        target_user = fetch_user_by_identity("zhengjingpei") or fetch_user_by_identity("郑敬佩")
+        if target_user is None:
+            return jsonify({"ok": False, "message": "未找到郑敬佩账号。"}), 404
+
+        bug = fetch_bug(bug_id)
+        if bug is None:
+            return jsonify({"ok": False, "message": "未找到对应的待办。"}), 404
+        if int(bug["assignee_id"] or 0) != int(target_user["id"]):
+            return jsonify({"ok": False, "message": "该数据当前不归属郑敬佩，不能通过此接口变更。"}), 403
+
+        payload = request.get_json(silent=True) if request.is_json else None
+        data = payload if isinstance(payload, dict) else {}
+        raw_status = data.get("status", request.form.get("status", ""))
+        selected_status = normalize_bug_status_value(raw_status)
+        if selected_status is None or selected_status not in STATUS_LABELS:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "message": "目标状态无效。",
+                        "valid_statuses": [{"code": code, "label": label} for code, label in STATUS_OPTIONS],
+                    }
+                ),
+                400,
+            )
+
+        note = str(data.get("resolution_note", data.get("note", request.form.get("resolution_note", ""))) or "").strip()
+        operator_name = str(data.get("operator_name", data.get("operator", "郑敬佩待办接口")) or "").strip() or "郑敬佩待办接口"
+        db = get_db()
+        try:
+            new_status, new_assignee_id, new_previous_assignee_id, action_label, detail = apply_bug_action(
+                db=db,
+                bug=bug,
+                action="change_status",
+                operator_name=operator_name,
+                note=note,
+                selected_status=selected_status,
+            )
+        except ValueError as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+        now_text = current_time()
+        db.execute(
+            """
+            UPDATE bugs
+            SET status = ?, assignee_id = ?, previous_assignee_id = ?, resolution_note = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (new_status, new_assignee_id, new_previous_assignee_id, note or bug["resolution_note"], now_text, bug_id),
+        )
+        target_assignee = fetch_user(new_assignee_id)
+        add_history(
+            db,
+            bug_id,
+            action_label,
+            detail,
+            operator_name,
+            environment_snapshot=bug["environment"] or "",
+            status_snapshot=new_status,
+            assignee_snapshot=target_assignee["name"] if target_assignee else bug["assignee_name"],
+        )
+        db.commit()
+        bump_bug_sync_token()
+
+        detail_row = fetch_todo_detail_bug(bug_id)
+        return jsonify(
+            {
+                "ok": True,
+                "message": "待办状态已更新。",
+                "previous_status": {
+                    "code": bug["status"] or "",
+                    "label": STATUS_LABELS.get(str(bug["status"] or ""), str(bug["status"] or "")),
+                },
+                "current_status": {
+                    "code": new_status,
+                    "label": STATUS_LABELS.get(new_status, new_status),
+                },
+                "todo": serialize_todo_bug(detail_row) if detail_row is not None else None,
+                "todo_detail": serialize_todo_detail_with_relations(detail_row) if detail_row is not None else None,
             }
         )
 
