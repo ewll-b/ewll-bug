@@ -5895,9 +5895,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             "url": url_for("bug_detail", bug_id=bug_id),
         }
 
-    def serialize_todo_bug(row: sqlite3.Row) -> dict[str, object]:
-        detail = serialize_todo_detail(row)
-        # 保留 todos[].detail 兼容旧调用方，同时顶层返回 todo_details。
+    def serialize_todo_bug(row: sqlite3.Row, detail: dict[str, object] | None = None) -> dict[str, object]:
+        detail = detail or serialize_todo_detail(row)
+        # 保留 todos[].detail 兼容旧调用方，评论等明细也同步放入。
         return {
             "id": detail["id"],
             "bug_no": detail["bug_no"],
@@ -6885,7 +6885,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "statuses": [{"code": code, "label": STATUS_LABELS[code]} for code in statuses],
                 },
                 "count": len(rows),
-                "todos": [serialize_todo_bug(row) for row in rows],
+                "todos": [serialize_todo_bug(row, detail) for row, detail in zip(rows, todo_details)],
                 "todo_details": todo_details,
             }
         )
@@ -6957,6 +6957,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         bump_bug_sync_token()
 
         detail_row = fetch_todo_detail_bug(bug_id)
+        todo_detail = serialize_todo_detail_with_relations(detail_row) if detail_row is not None else None
         return jsonify(
             {
                 "ok": True,
@@ -6969,8 +6970,8 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "code": new_status,
                     "label": STATUS_LABELS.get(new_status, new_status),
                 },
-                "todo": serialize_todo_bug(detail_row) if detail_row is not None else None,
-                "todo_detail": serialize_todo_detail_with_relations(detail_row) if detail_row is not None else None,
+                "todo": serialize_todo_bug(detail_row, todo_detail) if detail_row is not None and todo_detail is not None else None,
+                "todo_detail": todo_detail,
             }
         )
 

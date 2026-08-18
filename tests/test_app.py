@@ -930,6 +930,7 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(todo["detail"]["description"], "郑敬佩打开状态待办 描述")
         self.assertEqual(todo["detail"]["requirement"]["code"], "REQ-ZJP-001")
         self.assertEqual(todo["detail"]["case"]["case_no"], "TC-ZJP-001")
+        self.assertEqual(todo["detail"]["comments"][0]["content"], "接口详情评论")
         self.assertEqual(todo["detail"]["url"], f"/bugs/{bug_id}")
         detail = payload["todo_details"][0]
         self.assertEqual(detail["id"], bug_id)
