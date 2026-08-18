@@ -1601,6 +1601,23 @@ a {
     line-height: 1.5;
 }
 
+.attachment-drop-field {
+    position: relative;
+}
+
+.attachment-file-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    border: 0;
+    white-space: nowrap;
+}
+
 .form-grid label.required-missing > span {
     color: #c2413b;
 }
@@ -1716,7 +1733,7 @@ a {
     color: #5b6475;
     display: grid;
     gap: 4px;
-    cursor: text;
+    cursor: pointer;
 }
 
 .paste-upload-content {
@@ -1756,10 +1773,16 @@ a {
 }
 
 .paste-upload-box:focus-within,
-.paste-upload-box.is-active {
+.paste-upload-box.is-active,
+.paste-upload-box.is-dragging {
     border-color: #5d9cff;
     background: #eef5ff;
     box-shadow: 0 0 0 3px rgba(93, 156, 255, 0.14);
+}
+
+.paste-upload-box.is-dragging {
+    border-style: solid;
+    transform: translateY(-1px);
 }
 
 .paste-file-list {

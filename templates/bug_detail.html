@@ -251,10 +251,17 @@
                 <div class="paste-inline-preview" data-paste-preview-for="actual_result" hidden></div>
                 <small class="field-tip">支持在框内输入文字和粘贴图片，图片会随 Bug 一起保存。</small>
             </label>
-            <label class="full">
+            <label class="full attachment-drop-field">
                 <span>附件</span>
-                <input type="file" name="attachments" multiple accept="video/*,.log,.txt,.zip,.json,.pdf,.doc,.docx,.xls,.xlsx" data-paste-file-input>
-                <small class="field-tip">附件用于上传文件、视频、日志、文本和压缩包；图片请直接粘贴到上方图文框。</small>
+                <input class="attachment-file-input" type="file" name="attachments" multiple accept="video/*,.log,.txt,.zip,.json,.pdf,.doc,.docx,.xls,.xlsx" data-paste-file-input tabindex="-1" aria-hidden="true">
+                <div class="paste-upload-box attachment-drop-zone" data-paste-upload data-file-drop-zone role="button" aria-label="拖拽或选择附件">
+                    <div class="paste-upload-content">
+                        <strong>拖拽附件到这里</strong>
+                        <small>支持日志、文档、视频、压缩包等文件</small>
+                    </div>
+                </div>
+                <div class="paste-file-list" data-paste-file-list hidden></div>
+                <small class="field-tip">图片请直接粘贴到上方图文框。</small>
             </label>
             <div class="full detail-edit-attachments">
                 <span>当前附件</span>

@@ -8260,8 +8260,14 @@ def create_app(test_config: dict | None = None) -> Flask:
             or redirect_target.startswith(f"{todo_redirect_path}?")
             or redirect_target.startswith(f"{todo_redirect_path}#")
         )
+        bug_list_path = url_for("bug_list")
+        returns_to_bug_list = (
+            redirect_target == bug_list_path
+            or redirect_target.startswith(f"{bug_list_path}?")
+            or redirect_target.startswith(f"{bug_list_path}#")
+        )
         if new_status == "closed" and not returns_to_todo_page:
-            return redirect(url_for("bug_list"))
+            return redirect(redirect_target if returns_to_bug_list else bug_list_path)
         return redirect(redirect_target)
 
     @app.route("/reports/testing")

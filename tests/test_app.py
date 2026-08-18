@@ -473,6 +473,19 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertIn(hint_text, new_response.data)
         self.assertIn(hint_text, list_response.data)
 
+    def test_bug_forms_include_attachment_drop_zone(self) -> None:
+        self.login_as("lit", "123456")
+
+        list_response = self.client.get("/bugs")
+        new_response = self.client.get("/bugs/new")
+        edit_response = self.client.get("/bugs/1?tab=detail&edit=1")
+
+        for response in (list_response, new_response, edit_response):
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('data-file-drop-zone'.encode("utf-8"), response.data)
+            self.assertIn('data-paste-file-list'.encode("utf-8"), response.data)
+            self.assertIn("拖拽附件到这里".encode("utf-8"), response.data)
+
     def test_bug_assignee_choices_exclude_admin(self) -> None:
         self.login_as("lit", "123456")
         with sqlite3.connect(self.app.config["DATABASE"]) as conn:
@@ -2456,6 +2469,23 @@ class BugPlatformTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], "/bugs")
+
+    def test_change_status_to_closed_preserves_bug_list_filters(self) -> None:
+        self.login_as("lit", "123456")
+        filtered_list_url = "/bugs?version=2.8.0&platform=WEB&status=pending_verification&page=2"
+
+        response = self.client.post(
+            "/bugs/1/update",
+            data={
+                "action": "change_status",
+                "status": "closed",
+                "redirect_to": filtered_list_url,
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], filtered_list_url)
 
     def test_close_action_redirects_to_bug_list(self) -> None:
         self.login_as("lit", "123456")

@@ -1603,9 +1603,20 @@ document.addEventListener("DOMContentLoaded", function () {
                 submitButton.textContent = "创建中...";
             }
             try {
+                delete form.dataset.attachmentFormDataSynced;
+                const requestFormData = new FormData(form);
+                const attachmentHandlers = attachmentFormHandlers.get(form);
+                if (
+                    attachmentHandlers
+                    && typeof attachmentHandlers.appendToFormData === "function"
+                    && form.dataset.attachmentFormDataSynced !== "1"
+                ) {
+                    attachmentHandlers.appendToFormData(requestFormData);
+                }
+                delete form.dataset.attachmentFormDataSynced;
                 const response = await fetch(form.action, {
                     method: "POST",
-                    body: new FormData(form),
+                    body: requestFormData,
                     headers: {
                         "Accept": "application/json",
                         "X-Requested-With": "XMLHttpRequest"
@@ -1699,6 +1710,8 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
+    const attachmentFormHandlers = new WeakMap();
+
     document.querySelectorAll("form[enctype='multipart/form-data']").forEach(function (form) {
         const fileInput = form.querySelector("[data-paste-file-input]");
         const pasteBox = form.querySelector("[data-paste-upload]");
@@ -1712,8 +1725,10 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         const dataTransfer = new DataTransfer();
+        const attachmentFiles = [];
         const fileSources = [];
         const previewUrls = [];
+        const attachmentPreviewUrls = [];
         const fileClientIds = [];
         const fileDraftDataUrls = [];
         let nextFileClientId = 1;
@@ -1927,13 +1942,30 @@ document.addEventListener("DOMContentLoaded", function () {
             syncFiles();
         }
 
-        function appendRemoveButton(container, index) {
+        function removeAttachmentAt(index) {
+            const nextFiles = [];
+            const nextPreviewUrls = [];
+            attachmentFiles.forEach(function (currentFile, currentIndex) {
+                if (currentIndex === index) {
+                    revokePreviewUrl(attachmentPreviewUrls[currentIndex]);
+                    return;
+                }
+                nextFiles.push(currentFile);
+                nextPreviewUrls.push(attachmentPreviewUrls[currentIndex] || "");
+            });
+            attachmentFiles.splice(0, attachmentFiles.length, ...nextFiles);
+            attachmentPreviewUrls.splice(0, attachmentPreviewUrls.length, ...nextPreviewUrls);
+            syncFiles();
+        }
+
+        function appendRemoveButton(container, index, remover) {
             const removeButton = document.createElement("button");
             removeButton.className = "paste-file-remove";
             removeButton.type = "button";
             removeButton.textContent = "×";
+            const removeHandler = remover || removeFileAt;
             removeButton.addEventListener("click", function () {
-                removeFileAt(index);
+                removeHandler(index);
             });
             container.appendChild(removeButton);
         }
@@ -1990,11 +2022,45 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
             fileList.innerHTML = "";
-            if (!dataTransfer.files.length) {
+            if (!attachmentFiles.length && !dataTransfer.files.length) {
                 fileList.hidden = true;
                 return;
             }
             let renderedCount = 0;
+            attachmentFiles.forEach(function (file, index) {
+                const item = document.createElement("div");
+                item.className = "paste-file-item";
+
+                const main = document.createElement("div");
+                main.className = "paste-file-main";
+
+                if (attachmentPreviewUrls[index]) {
+                    const thumbnail = document.createElement("img");
+                    thumbnail.className = "paste-file-thumb";
+                    thumbnail.src = attachmentPreviewUrls[index];
+                    thumbnail.alt = file.name;
+                    main.appendChild(thumbnail);
+                }
+
+                const meta = document.createElement("div");
+                meta.className = "paste-file-meta";
+
+                const name = document.createElement("span");
+                name.className = "paste-file-name";
+                name.textContent = file.name;
+
+                const source = document.createElement("span");
+                source.className = "paste-file-source";
+                source.textContent = "附件";
+
+                meta.appendChild(name);
+                meta.appendChild(source);
+                main.appendChild(meta);
+                item.appendChild(main);
+                appendRemoveButton(item, index, removeAttachmentAt);
+                fileList.appendChild(item);
+                renderedCount += 1;
+            });
             Array.from(dataTransfer.files).forEach(function (file, index) {
                 const sourceField = normalizeSourceField(fileSources[index] || "attachments");
                 if (sourceFieldHasRichEditor(sourceField) && previewUrls[index]) {
@@ -2065,6 +2131,51 @@ document.addEventListener("DOMContentLoaded", function () {
             syncFiles();
             return addedItems;
         }
+
+        function addAttachmentFiles(files, successMessage) {
+            const selectedFiles = Array.from(files || []).filter(Boolean);
+            if (!selectedFiles.length) {
+                return false;
+            }
+            selectedFiles.forEach(function (file) {
+                attachmentFiles.push(file);
+                attachmentPreviewUrls.push(getPreviewUrl(file));
+            });
+            fileInput.value = "";
+            syncFiles();
+            flashPasteBox();
+            showToast(successMessage || selectedFiles.length + " 个附件已添加。", "success");
+            return true;
+        }
+
+        function hasDraggedFiles(event) {
+            const types = Array.from((event.dataTransfer && event.dataTransfer.types) || []);
+            return types.indexOf("Files") >= 0;
+        }
+
+        function setDropZoneActive(isActive) {
+            if (pasteBox) {
+                pasteBox.classList.toggle("is-dragging", Boolean(isActive));
+            }
+        }
+
+        function appendAttachmentFilesToFormData(formData) {
+            attachmentFiles.forEach(function (file) {
+                formData.append("attachments", file, file.name);
+            });
+        }
+
+        form.addEventListener("formdata", function (event) {
+            form.dataset.attachmentFormDataSynced = "1";
+            appendAttachmentFilesToFormData(event.formData);
+        });
+
+        attachmentFormHandlers.set(form, {
+            addFiles: addAttachmentFiles,
+            appendToFormData: appendAttachmentFilesToFormData,
+            setActive: setDropZoneActive
+        });
+        form.dataset.attachmentDropReady = "1";
 
         function flashPasteBox() {
             if (!pasteBox) {
@@ -2170,9 +2281,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
         function clearInlineDraftImages() {
             previewUrls.forEach(revokePreviewUrl);
+            attachmentPreviewUrls.forEach(revokePreviewUrl);
             dataTransfer.items.clear();
+            attachmentFiles.splice(0, attachmentFiles.length);
             fileSources.splice(0, fileSources.length);
             previewUrls.splice(0, previewUrls.length);
+            attachmentPreviewUrls.splice(0, attachmentPreviewUrls.length);
             fileClientIds.splice(0, fileClientIds.length);
             fileDraftDataUrls.splice(0, fileDraftDataUrls.length);
             form.querySelectorAll("[data-rich-file-id]").forEach(function (node) {
@@ -2337,7 +2451,9 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         fileInput.addEventListener("change", function () {
-            syncFiles();
+            if (!addAttachmentFiles(fileInput.files, "附件已添加。")) {
+                syncFiles();
+            }
         });
 
         richEditors.forEach(function (editor) {
@@ -2394,9 +2510,12 @@ document.addEventListener("DOMContentLoaded", function () {
         form.addEventListener("reset", function () {
             window.setTimeout(function () {
                 previewUrls.forEach(revokePreviewUrl);
+                attachmentPreviewUrls.forEach(revokePreviewUrl);
                 dataTransfer.items.clear();
+                attachmentFiles.splice(0, attachmentFiles.length);
                 fileSources.splice(0, fileSources.length);
                 previewUrls.splice(0, previewUrls.length);
+                attachmentPreviewUrls.splice(0, attachmentPreviewUrls.length);
                 fileClientIds.splice(0, fileClientIds.length);
                 fileDraftDataUrls.splice(0, fileDraftDataUrls.length);
                 richEditors.forEach(function (editor) {
@@ -2438,8 +2557,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 showToast("未检测到图片内容，请先复制截图。", "error");
             });
 
-            pasteBox.addEventListener("click", function () {
-                focusPasteCapture();
+            pasteBox.addEventListener("click", function (event) {
+                event.preventDefault();
+                fileInput.click();
             });
 
             pasteBox.addEventListener("focus", function () {
@@ -2449,8 +2569,40 @@ document.addEventListener("DOMContentLoaded", function () {
             pasteBox.addEventListener("keydown", function (event) {
                 if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    focusPasteCapture();
+                    fileInput.click();
                 }
+            });
+
+            pasteBox.addEventListener("dragenter", function (event) {
+                if (!hasDraggedFiles(event)) {
+                    return;
+                }
+                event.preventDefault();
+                setDropZoneActive(true);
+            });
+
+            pasteBox.addEventListener("dragover", function (event) {
+                if (!hasDraggedFiles(event)) {
+                    return;
+                }
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+                setDropZoneActive(true);
+            });
+
+            pasteBox.addEventListener("dragleave", function (event) {
+                if (!pasteBox.contains(event.relatedTarget)) {
+                    setDropZoneActive(false);
+                }
+            });
+
+            pasteBox.addEventListener("drop", function (event) {
+                if (!hasDraggedFiles(event)) {
+                    return;
+                }
+                event.preventDefault();
+                setDropZoneActive(false);
+                addAttachmentFiles(event.dataTransfer.files);
             });
 
             pasteBox.setAttribute("tabindex", "0");
@@ -2463,6 +2615,102 @@ document.addEventListener("DOMContentLoaded", function () {
             restore: restoreDraftPayload,
             snapshot: collectDraftSnapshot
         });
+    });
+
+    function dragEventHasFiles(event) {
+        const types = Array.from((event.dataTransfer && event.dataTransfer.types) || []);
+        return types.indexOf("Files") >= 0;
+    }
+
+    function isVisibleElement(element) {
+        if (!element || element.closest("[hidden]")) {
+            return false;
+        }
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    }
+
+    function activeAttachmentForm() {
+        return Array.from(document.querySelectorAll("form[enctype='multipart/form-data']")).find(function (form) {
+            return Boolean(attachmentFormHandlers.has(form) && isVisibleElement(form.querySelector("[data-file-drop-zone]")));
+        }) || null;
+    }
+
+    function createBugAttachmentForm() {
+        const modal = document.getElementById("create-bug-modal");
+        if (!modal) {
+            return null;
+        }
+        openFloatingModal(modal);
+        return modal.querySelector("form[enctype='multipart/form-data']");
+    }
+
+    function attachmentFormForPageDrop() {
+        return activeAttachmentForm() || createBugAttachmentForm();
+    }
+
+    function markAttachmentFormDropActive(form, isActive) {
+        const handlers = form ? attachmentFormHandlers.get(form) : null;
+        if (handlers && typeof handlers.setActive === "function") {
+            handlers.setActive(isActive);
+        }
+    }
+
+    document.addEventListener("dragenter", function (event) {
+        if (!dragEventHasFiles(event)) {
+            return;
+        }
+        const form = attachmentFormForPageDrop();
+        if (!form) {
+            return;
+        }
+        event.preventDefault();
+        markAttachmentFormDropActive(form, true);
+    });
+
+    document.addEventListener("dragover", function (event) {
+        if (!dragEventHasFiles(event)) {
+            return;
+        }
+        const form = attachmentFormForPageDrop();
+        if (!form) {
+            return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        markAttachmentFormDropActive(form, true);
+    });
+
+    document.addEventListener("dragleave", function (event) {
+        if (!dragEventHasFiles(event)) {
+            return;
+        }
+        if (event.clientX > 0 && event.clientY > 0 && event.clientX < window.innerWidth && event.clientY < window.innerHeight) {
+            return;
+        }
+        markAttachmentFormDropActive(activeAttachmentForm(), false);
+    });
+
+    document.addEventListener("drop", function (event) {
+        if (!dragEventHasFiles(event)) {
+            return;
+        }
+        if (event.target instanceof Element && event.target.closest("[data-file-drop-zone]")) {
+            return;
+        }
+        const form = attachmentFormForPageDrop();
+        const handlers = form ? attachmentFormHandlers.get(form) : null;
+        if (!form || !handlers || typeof handlers.addFiles !== "function") {
+            return;
+        }
+        event.preventDefault();
+        markAttachmentFormDropActive(form, false);
+        handlers.addFiles(event.dataTransfer.files);
+        const dropZone = form.querySelector("[data-file-drop-zone]");
+        if (dropZone && typeof dropZone.scrollIntoView === "function") {
+            dropZone.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
     });
 
     document.querySelectorAll("form[data-draft-form]").forEach(function (form) {
