@@ -77,7 +77,32 @@ sudo systemctl enable --now ewll-bug
 sudo systemctl status ewll-bug
 ```
 
-## 6. 必须备份的数据
+## 6. test 发布目录注意事项
+
+test 机器如果使用 `/home/echooo/fed/ewll-bug-test/current` 作为当前发布目录，数据库和上传附件必须放在 `current` 外，避免发布切换后读到新的空数据库或新的上传目录。可参考 `deploy/ewll-bug-test.env.example`：
+
+```bash
+DATABASE=/home/echooo/fed/ewll-bug-test/data/bug_platform.db
+UPLOAD_FOLDER=/home/echooo/fed/ewll-bug-test/uploads
+```
+
+test 的 systemd 服务建议只使用 1 个 gunicorn worker：
+
+```ini
+ExecStart=/home/echooo/fed/ewll-bug-test/current/.venv/bin/gunicorn -w 1 -b 127.0.0.1:5051 wsgi:app
+```
+
+如果历史数据已经落在 `current/data/bug_platform.db`，先停服务，再把数据库迁移到固定目录，最后重启服务：
+
+```bash
+sudo systemctl stop ewll-bug-test
+mkdir -p /home/echooo/fed/ewll-bug-test/data /home/echooo/fed/ewll-bug-test/uploads
+cp /home/echooo/fed/ewll-bug-test/current/data/bug_platform.db /home/echooo/fed/ewll-bug-test/data/bug_platform.db
+sudo systemctl daemon-reload
+sudo systemctl restart ewll-bug-test
+```
+
+## 7. 必须备份的数据
 
 定期备份：
 
