@@ -839,6 +839,10 @@ a {
     width: 88px;
 }
 
+.bug-col-project {
+    width: 160px;
+}
+
 .bug-col-title {
     width: 420px;
 }

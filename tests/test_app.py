@@ -208,6 +208,8 @@ class BugPlatformTestCase(unittest.TestCase):
 
     def test_bug_list_pagination_controls_filtered_results(self) -> None:
         self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
         with sqlite3.connect(self.app.config["DATABASE"]) as conn:
             conn.row_factory = sqlite3.Row
             creator = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
@@ -262,6 +264,8 @@ class BugPlatformTestCase(unittest.TestCase):
 
     def test_bug_list_supports_multi_select_filters(self) -> None:
         self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
         with sqlite3.connect(self.app.config["DATABASE"]) as conn:
             conn.row_factory = sqlite3.Row
             creator = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
@@ -317,6 +321,8 @@ class BugPlatformTestCase(unittest.TestCase):
 
     def test_bug_list_summary_uses_all_active_filters(self) -> None:
         self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
         with sqlite3.connect(self.app.config["DATABASE"]) as conn:
             conn.row_factory = sqlite3.Row
             creator = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
@@ -621,9 +627,97 @@ class BugPlatformTestCase(unittest.TestCase):
         response = self.client.get("/todos")
         self.assertEqual(response.status_code, 200)
         self.assertIn("我的待办".encode("utf-8"), response.data)
+        self.assertIn("范围：全部项目".encode("utf-8"), response.data)
+        self.assertIn("商家工作台".encode("utf-8"), response.data)
         self.assertIn('<th class="bug-col-platform">端</th>'.encode("utf-8"), response.data)
         self.assertIn("platform-chip".encode("utf-8"), response.data)
         self.assertIn("WEB".encode("utf-8"), response.data)
+
+    def test_my_todos_page_lists_items_across_projects(self) -> None:
+        self.login_as("lit", "123456")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            assignee = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
+            conn.execute(
+                """
+                INSERT INTO bugs (
+                    bug_no, title, project_id, version, module, platform, severity, priority, status,
+                    assignee_id, creator_id, reporter, environment, description,
+                    expected_result, actual_result, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "TODO-OTHER",
+                    "跨项目待办仍需展示",
+                    2,
+                    "2.9.0",
+                    "H5",
+                    "H5",
+                    "中",
+                    "中",
+                    "open",
+                    assignee["id"],
+                    assignee["id"],
+                    "李婷",
+                    "测试环境",
+                    "验证我的待办不受当前项目过滤",
+                    "展示待办",
+                    "未展示",
+                    "2026-07-28 11:00:00",
+                    "2026-07-28 11:00:00",
+                ),
+            )
+            conn.commit()
+
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
+        response = self.client.get("/todos")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("跨项目待办仍需展示".encode("utf-8"), response.data)
+        self.assertIn("智能客服系统".encode("utf-8"), response.data)
+
+    def test_login_defaults_to_project_with_user_todos(self) -> None:
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            assignee = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()
+            conn.execute(
+                """
+                INSERT INTO bugs (
+                    bug_no, title, project_id, version, module, platform, severity, priority, status,
+                    assignee_id, creator_id, reporter, environment, description,
+                    expected_result, actual_result, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "TODO-LOGIN",
+                    "登录后默认进入待办项目",
+                    2,
+                    "2.9.0",
+                    "WEB",
+                    "WEB",
+                    "高",
+                    "高",
+                    "open",
+                    assignee["id"],
+                    assignee["id"],
+                    "李婷",
+                    "测试环境",
+                    "验证登录默认项目",
+                    "进入有待办的项目",
+                    "进入第一个项目",
+                    "2026-07-28 12:00:00",
+                    "2030-07-28 12:00:00",
+                ),
+            )
+            conn.commit()
+
+        self.login_as("lit", "123456")
+
+        with self.client.session_transaction() as session:
+            self.assertEqual(session["project_id"], 2)
 
     def test_my_todos_status_change_to_closed_stays_on_todos(self) -> None:
         self.login_as("lit", "123456")
@@ -1167,6 +1261,8 @@ class BugPlatformTestCase(unittest.TestCase):
 
     def test_create_bug_uses_logged_in_user_as_creator(self) -> None:
         self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
         response = self.client.post(
             "/bugs/new",
             data={
@@ -1189,6 +1285,8 @@ class BugPlatformTestCase(unittest.TestCase):
 
     def test_create_bug_with_attachment_and_open_it(self) -> None:
         self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
         response = self.client.post(
             "/bugs/new",
             data={
@@ -1227,6 +1325,8 @@ class BugPlatformTestCase(unittest.TestCase):
 
     def test_create_bug_with_inline_image_source_shows_in_field(self) -> None:
         self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
         response = self.client.post(
             "/bugs/new",
             data={
@@ -1311,6 +1411,8 @@ class BugPlatformTestCase(unittest.TestCase):
             conn.commit()
 
         self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
         response = self.client.post(
             "/bugs/new",
             data={
@@ -1403,6 +1505,8 @@ class BugPlatformTestCase(unittest.TestCase):
             conn.commit()
 
         self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
         response = self.client.post(
             "/bugs/new",
             data={
