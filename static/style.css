@@ -1589,6 +1589,18 @@ a {
     font-size: 12px;
 }
 
+/* 新建 Bug 表单的网页信息提示。 */
+.bug-create-tip {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid #d9e8ff;
+    border-radius: 8px;
+    background: #f3f8ff;
+    color: #245bb5;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
 .form-grid label.required-missing > span {
     color: #c2413b;
 }

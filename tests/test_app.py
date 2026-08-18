@@ -460,6 +460,19 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('data-filter-value="WEB"'.encode("utf-8"), response.data)
 
+    def test_bug_create_entries_show_webpage_hint(self) -> None:
+        self.login_as("lit", "123456")
+
+        # 新建页和列表弹窗都需要提醒填写网页定位信息。
+        hint_text = "请注明网页名称，并提交网页链接。".encode("utf-8")
+        new_response = self.client.get("/bugs/new")
+        list_response = self.client.get("/bugs")
+
+        self.assertEqual(new_response.status_code, 200)
+        self.assertEqual(list_response.status_code, 200)
+        self.assertIn(hint_text, new_response.data)
+        self.assertIn(hint_text, list_response.data)
+
     def test_bug_assignee_choices_exclude_admin(self) -> None:
         self.login_as("lit", "123456")
         with sqlite3.connect(self.app.config["DATABASE"]) as conn:

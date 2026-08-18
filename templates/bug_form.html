@@ -13,6 +13,8 @@
 
     <form class="form-grid" method="post" enctype="multipart/form-data" data-bug-create-form data-draft-form data-draft-key="bug-create:{{ current_project.id if current_project else 'none' }}" novalidate>
         <input type="hidden" name="next" value="{{ back_url }}">
+        <!-- 新建 Bug 时提醒补充定位网页所需信息。 -->
+        <p class="bug-create-tip full">请注明网页名称，并提交网页链接。</p>
         {% include "_bug_form_fields.html" %}
         <div class="form-actions full">
             <button class="btn btn-primary" type="submit">创建Bug</button>
