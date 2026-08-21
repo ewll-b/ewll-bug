@@ -8,12 +8,15 @@ import { useSessionStore } from '../stores/session'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
 import BugFormModal from '../components/BugFormModal.vue'
+import BugDetailDrawer from '../components/BugDetailDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const loading = ref(false)
 const modalVisible = ref(false)
+const detailVisible = ref(false)
+const selectedBugId = ref<number>()
 const data = ref<DataRecord>({ page: { items: [], total: 0, page: 1 }, summary: {}, versions: [], users: [], requirements: [], cases: [] })
 const filters = reactive<DataRecord>({ keyword: '', version: [], platform: [], status: [], creator_id: [], assignee_id: [], created_from: '', created_to: '', page: 1 })
 const columns = [
@@ -64,6 +67,8 @@ async function changePage(page: number) {
   await search()
 }
 
+function openDetail(id: number) { selectedBugId.value = id; detailVisible.value = true }
+
 async function updateStatus(item: DataRecord, status: unknown) {
   if (typeof status !== 'string') return
   const form = new FormData(); form.set('action', 'change_status'); form.set('status', status)
@@ -97,8 +102,8 @@ onMounted(async () => { hydrateQuery(); if (!session.ready) await session.load()
         <a-button type="primary" @click="search"><IconSearch />查询</a-button>
       </div>
       <a-table :columns="columns" :data="data.page.items" :loading="loading" :pagination="false" row-key="id" :scroll="{ x: 1160 }" stripe>
-        <template #bugNo="{ record }"><router-link class="table-link" :to="`/bugs/${record.id}`">{{ record.bug_no }}</router-link></template>
-        <template #title="{ record }"><router-link class="table-link" :to="`/bugs/${record.id}`">{{ record.title }}</router-link></template>
+        <template #bugNo="{ record }"><a-link class="table-link" @click="openDetail(Number(record.id))">{{ record.bug_no }}</a-link></template>
+        <template #title="{ record }"><a-link class="table-link" @click="openDetail(Number(record.id))">{{ record.title }}</a-link></template>
         <template #severity="{ record }"><a-tag :color="record.severity === '最高' ? 'red' : record.severity === '高' ? 'orangered' : 'gray'">{{ record.severity }}</a-tag></template>
         <template #status="{ record }">
           <a-select :model-value="record.status" size="small" @change="(value) => updateStatus(record, value)"><a-option v-for="item in session.options.statuses" :key="item.value" :value="item.value"><StatusTag :status="item.value" /></a-option></a-select>
@@ -107,5 +112,6 @@ onMounted(async () => { hydrateQuery(); if (!session.ready) await session.load()
       <a-pagination :current="data.page.page" :total="data.page.total" :page-size="20" show-total @change="changePage" />
     </section>
     <BugFormModal v-model:visible="modalVisible" :users="data.users" :requirements="data.requirements" :cases="data.cases" :default-version="filters.version[0] || ''" @saved="load" />
+    <BugDetailDrawer v-model:visible="detailVisible" :bug-id="selectedBugId" @changed="load" @deleted="load" />
   </div>
 </template>

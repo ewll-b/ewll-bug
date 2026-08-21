@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { IconArrowLeft, IconCheckCircle } from '@arco-design/web-vue/es/icon'
 import { api, type DataRecord } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 
-const route = useRoute(); const router = useRouter(); const id = computed(() => Number(route.params.id))
+const props = withDefaults(defineProps<{ entityId?: number; embedded?: boolean }>(), {
+  entityId: undefined,
+  embedded: false,
+})
+const route = useRoute(); const router = useRouter()
+// 在线用例详情同时服务独立路由和列表抽屉。
+const id = computed(() => Number(props.entityId ?? route.params.id))
 const loading = ref(false); const savingKey = ref(''); const data = ref<DataRecord>({ document: {}, cases: [], columns: [], meta: {} })
 const platformOptions = [{ value: '', label: '未测' }, { value: 'pass', label: '通过' }, { value: 'failed', label: '失败' }, { value: 'block', label: '受阻' }, { value: 'skip', label: '跳过' }]
 const columns = computed(() => [
@@ -29,12 +35,13 @@ async function save(record: DataRecord, field: string, value: unknown) {
   try { const form = new FormData(); form.set('case_id', String(record.id)); form.set('field', field); form.set('value', String(value ?? '')); const result = await api.autosaveCase(id.value, form); record.execute_status = result.data?.execute_status || record.execute_status } finally { savingKey.value = '' }
 }
 function dynamicValue(record: DataRecord, columnId: number) { return record.dynamic_values?.[columnId] ?? record.dynamic_values?.[String(columnId)] ?? '' }
-onMounted(load)
+watch(id, load, { immediate: true })
 </script>
 
 <template>
   <div class="page-stack">
-    <PageHeader :title="data.document.doc_name || '在线用例文档'" :description="`${data.document.version || '-'} · ${data.document.folder_name || '-'}`"><a-button @click="router.push('/cases')"><IconArrowLeft />返回用例库</a-button></PageHeader>
+    <PageHeader v-if="!embedded" :title="data.document.doc_name || '在线用例文档'" :description="`${data.document.version || '-'} · ${data.document.folder_name || '-'}`"><a-button @click="router.push('/cases')"><IconArrowLeft />返回用例库</a-button></PageHeader>
+    <div v-else class="drawer-detail-header"><div><h2>{{ data.document.doc_name || '在线用例文档' }}</h2><p>{{ data.document.version || '-' }} · {{ data.document.folder_name || '-' }}</p></div></div>
     <section class="page-panel page-stack">
       <a-alert type="success"><IconCheckCircle />单元格失焦后自动保存</a-alert>
       <a-table :columns="columns" :data="data.cases" :loading="loading" :pagination="false" row-key="id" :scroll="{ x: 1900, y: 620 }" bordered>
@@ -52,3 +59,8 @@ onMounted(load)
     </section>
   </div>
 </template>
+
+<style scoped>
+.drawer-detail-header h2 { margin: 0; font-size: 18px; }
+.drawer-detail-header p { margin: 5px 0 0; color: var(--muted-text); }
+</style>

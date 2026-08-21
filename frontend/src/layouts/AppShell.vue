@@ -128,7 +128,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.app-layout { min-height: 100vh; background: var(--app-bg); }
+.app-layout { width: 100%; min-height: 100vh; background: var(--app-bg); }
 .app-header { position: sticky; top: 0; z-index: 30; height: 56px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; background: var(--header-bg); border-bottom: 1px solid var(--panel-border); }
 .header-left, .header-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand-logo { width: 30px; height: 30px; object-fit: contain; }
@@ -136,7 +136,8 @@ onMounted(async () => {
 .project-select { width: 190px; }
 .app-sider { position: sticky; top: 56px; height: calc(100vh - 56px); padding-top: 10px; background: var(--sider-bg); border-right: 1px solid var(--panel-border); }
 .collapse-button { position: absolute; right: 10px; bottom: 16px; }
-.app-content { min-width: 0; padding: 20px; overflow: hidden; }
+/* 主内容始终占满除导航外的浏览器可用区域。 */
+.app-content { width: 100%; min-width: 0; min-height: calc(100vh - 56px); padding: 20px; overflow: hidden; }
 .mobile-menu-button { display: none; }
 @media (max-width: 768px) {
   .app-sider { display: none; }

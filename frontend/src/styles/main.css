@@ -26,7 +26,7 @@ body[arco-theme="dark"] {
 }
 
 * { box-sizing: border-box; }
-html, body, #app { width: 100%; min-height: 100%; margin: 0; }
+html, body, #app { width: 100%; height: 100%; min-height: 100%; margin: 0; }
 body { background: var(--app-bg); letter-spacing: 0; }
 a { color: inherit; }
 
@@ -49,6 +49,10 @@ a { color: inherit; }
 .content-text { white-space: pre-wrap; line-height: 1.7; overflow-wrap: anywhere; }
 .attachment-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; }
 .chart-box { width: 100%; height: 340px; }
+
+/* 业务页面铺满主内容区，数据较少时也保持完整浏览器高度。 */
+.app-content > .page-stack { width: 100%; min-height: 100%; }
+.app-content > .page-stack > :last-child { flex: 1; min-height: 0; }
 
 @media (max-width: 900px) {
   .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -5,16 +5,31 @@ import { Message } from '@arco-design/web-vue'
 import { IconCheck, IconNotification } from '@arco-design/web-vue/es/icon'
 import { api, type DataRecord } from '../api'
 import PageHeader from '../components/PageHeader.vue'
+import BugDetailDrawer from '../components/BugDetailDrawer.vue'
+import RequirementDetailDrawer from '../components/RequirementDetailDrawer.vue'
+import CaseDocumentDrawer from '../components/CaseDocumentDrawer.vue'
 
 const router = useRouter()
 const loading = ref(false)
 const state = ref('')
 const data = ref<DataRecord>({ items: [], unread_count: 0, total_count: 0 })
+const bugId = ref<number>(); const bugVisible = ref(false)
+const requirementId = ref<number>(); const requirementVisible = ref(false)
+const documentId = ref<number>(); const documentVisible = ref(false)
 async function load() { loading.value = true; try { data.value = await api.notifications(state.value) } finally { loading.value = false } }
 async function readAll() { const result = await api.readAllNotifications(); Message.success(result.message || '已全部标记为已读'); await load() }
 async function open(item: DataRecord) {
   const result = await api.readNotification(Number(item.id)); const link = result.data?.link_path || item.link_path || '/notifications'
-  await router.push(String(link).replace(/^\/for-test/, '')); await load()
+  const path = String(link).replace(/^\/for-test/, '')
+  // 消息列表中的实体详情也统一进入抽屉，其他功能链接保持正常跳转。
+  const bugMatch = path.match(/^\/bugs\/(\d+)/)
+  const requirementMatch = path.match(/^\/requirements\/(\d+)/)
+  const documentMatch = path.match(/^\/cases\/(\d+)/)
+  if (bugMatch) { bugId.value = Number(bugMatch[1]); bugVisible.value = true }
+  else if (requirementMatch) { requirementId.value = Number(requirementMatch[1]); requirementVisible.value = true }
+  else if (documentMatch) { documentId.value = Number(documentMatch[1]); documentVisible.value = true }
+  else await router.push(path)
+  await load()
 }
 onMounted(load)
 </script>
@@ -33,6 +48,9 @@ onMounted(load)
         </template>
       </a-list>
     </section>
+    <BugDetailDrawer v-model:visible="bugVisible" :bug-id="bugId" @changed="load" @deleted="load" />
+    <RequirementDetailDrawer v-model:visible="requirementVisible" :requirement-id="requirementId" @changed="load" @deleted="load" />
+    <CaseDocumentDrawer v-model:visible="documentVisible" :document-id="documentId" />
   </div>
 </template>
 

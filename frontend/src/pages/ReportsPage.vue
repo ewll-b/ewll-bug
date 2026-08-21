@@ -10,8 +10,10 @@ import { withAppBase } from '../api/paths'
 import { useSessionStore } from '../stores/session'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
+import BugDetailDrawer from '../components/BugDetailDrawer.vue'
 
 const session = useSessionStore(); const loading = ref(false); const version = ref(''); const data = ref<DataRecord>({ summary: {}, distribution: [], bugs: [], versions: [], bug_page: {} }); const chartEl = ref<HTMLElement | null>(null)
+const detailVisible = ref(false); const selectedBugId = ref<number>()
 echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 let chart: echarts.ECharts | null = null
 async function renderChart() {
@@ -21,6 +23,7 @@ async function renderChart() {
 }
 async function load() { loading.value = true; try { data.value = await api.report({ version: version.value }); await renderChart() } finally { loading.value = false } }
 function download() { window.open(`${withAppBase('/reports/testing/export')}?version=${encodeURIComponent(version.value)}`, '_blank') }
+function openDetail(id: number) { selectedBugId.value = id; detailVisible.value = true }
 function resize() { chart?.resize() }
 watch(() => session.isDark, renderChart)
 onMounted(async () => { window.addEventListener('resize', resize); await load() }); onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dispose() })
@@ -32,6 +35,7 @@ onMounted(async () => { window.addEventListener('resize', resize); await load() 
     <div class="page-toolbar"><a-select v-model="version" allow-clear placeholder="全部版本" @change="load"><a-option v-for="item in data.versions" :key="item" :value="item">{{ item }}</a-option></a-select></div>
     <div class="metric-row"><div class="metric"><div class="metric-label">测试用例</div><div class="metric-value">{{ data.case_total || 0 }}</div></div><div class="metric"><div class="metric-label">Bug 总数</div><div class="metric-value">{{ data.summary.total || 0 }}</div></div><div class="metric"><div class="metric-label">处理中</div><div class="metric-value">{{ data.summary.active_count || 0 }}</div></div><div class="metric"><div class="metric-label">待验证</div><div class="metric-value">{{ data.summary.verification_count || 0 }}</div></div></div>
     <section class="page-panel"><div ref="chartEl" class="chart-box" /></section>
-    <section class="page-panel"><a-table :data="data.bugs" :loading="loading" row-key="id" :pagination="false"><a-table-column title="编号" data-index="bug_no" /><a-table-column title="标题"><template #cell="{ record }"><router-link class="table-link" :to="`/bugs/${record.id}`">{{ record.title }}</router-link></template></a-table-column><a-table-column title="端" data-index="platform" /><a-table-column title="状态"><template #cell="{ record }"><StatusTag :status="record.status" /></template></a-table-column><a-table-column title="处理人" data-index="assignee_name" /></a-table></section>
+    <section class="page-panel"><a-table :data="data.bugs" :loading="loading" row-key="id" :pagination="false"><a-table-column title="编号" data-index="bug_no" /><a-table-column title="标题"><template #cell="{ record }"><a-link class="table-link" @click="openDetail(Number(record.id))">{{ record.title }}</a-link></template></a-table-column><a-table-column title="端" data-index="platform" /><a-table-column title="状态"><template #cell="{ record }"><StatusTag :status="record.status" /></template></a-table-column><a-table-column title="处理人" data-index="assignee_name" /></a-table></section>
+    <BugDetailDrawer v-model:visible="detailVisible" :bug-id="selectedBugId" @changed="load" @deleted="load" />
   </div>
 </template>

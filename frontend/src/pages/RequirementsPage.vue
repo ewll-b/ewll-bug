@@ -5,9 +5,12 @@ import { api, type DataRecord } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
 import RequirementFormModal from '../components/RequirementFormModal.vue'
+import RequirementDetailDrawer from '../components/RequirementDetailDrawer.vue'
 
 const loading = ref(false)
 const modalVisible = ref(false)
+const detailVisible = ref(false)
+const selectedRequirementId = ref<number>()
 const filters = reactive({ keyword: '', version: '', page: 1 })
 const data = ref<DataRecord>({ page: { items: [], total: 0, page: 1 }, versions: [], summary: {} })
 const columns = [
@@ -23,6 +26,7 @@ const columns = [
 async function load() { loading.value = true; try { data.value = await api.requirements(filters) } finally { loading.value = false } }
 async function search() { filters.page = 1; await load() }
 async function changePage(page: number) { filters.page = page; await load() }
+function openDetail(id: number) { selectedRequirementId.value = id; detailVisible.value = true }
 onMounted(load)
 </script>
 
@@ -38,11 +42,12 @@ onMounted(load)
     <section class="page-panel page-stack">
       <div class="page-toolbar"><a-input v-model="filters.keyword" allow-clear placeholder="搜索标题或链接" @press-enter="search"><template #prefix><IconSearch /></template></a-input><a-select v-model="filters.version" allow-clear placeholder="版本"><a-option v-for="item in data.versions" :key="item" :value="item">{{ item }}</a-option></a-select><a-button type="primary" @click="search"><IconSearch />查询</a-button></div>
       <a-table :columns="columns" :data="data.page.items" :loading="loading" :pagination="false" row-key="id" :scroll="{ x: 1050 }" stripe>
-        <template #title="{ record }"><router-link class="table-link" :to="`/requirements/${record.id}`">{{ record.title }}</router-link></template>
+        <template #title="{ record }"><a-link class="table-link" @click="openDetail(Number(record.id))">{{ record.title }}</a-link></template>
         <template #status="{ record }"><StatusTag :status="record.status" /></template>
       </a-table>
       <a-pagination :current="data.page.page" :total="data.page.total" :page-size="10" show-total @change="changePage" />
     </section>
     <RequirementFormModal v-model:visible="modalVisible" @saved="load" />
+    <RequirementDetailDrawer v-model:visible="detailVisible" :requirement-id="selectedRequirementId" @changed="load" @deleted="load" />
   </div>
 </template>

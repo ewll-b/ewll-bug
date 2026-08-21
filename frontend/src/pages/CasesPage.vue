@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { Message, type FileItem } from '@arco-design/web-vue'
 import { IconFolderAdd, IconUpload } from '@arco-design/web-vue/es/icon'
 import { api, type DataRecord } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import CaseManageModal from '../components/CaseManageModal.vue'
+import CaseDocumentDrawer from '../components/CaseDocumentDrawer.vue'
 
-const router = useRouter()
 const loading = ref(false); const manageVisible = ref(false); const version = ref(''); const uploadFolder = ref(''); const files = ref<FileItem[]>([])
+const documentVisible = ref(false); const selectedDocumentId = ref<number>()
 const data = ref<DataRecord>({ documents: [], tree: [], versions: [], distribution: [] })
 const folders = computed<string[]>(() => data.value.tree.map((item: DataRecord) => String(item.name)))
 const openFolderKeys = computed(() => folders.value.map((item) => `folder:${item}`))
 async function load() { loading.value = true; try { data.value = await api.cases(version.value); if (!uploadFolder.value) uploadFolder.value = folders.value[0] || '' } finally { loading.value = false } }
-async function selectDocument(key: string) { if (key.startsWith('doc:')) await router.push(`/cases/${key.slice(4)}`) }
+function selectDocument(key: string) { if (key.startsWith('doc:')) { selectedDocumentId.value = Number(key.slice(4)); documentVisible.value = true } }
 async function upload() {
   const file = files.value[0]?.file
   if (!uploadFolder.value || !file) return Message.warning('请选择目标文件夹和 Excel 文件。')
@@ -49,6 +49,7 @@ onMounted(load)
       </section>
     </div>
     <CaseManageModal v-model:visible="manageVisible" :folders="folders" @saved="load" />
+    <CaseDocumentDrawer v-model:visible="documentVisible" :document-id="selectedDocumentId" />
   </div>
 </template>
 

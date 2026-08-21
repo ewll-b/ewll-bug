@@ -3,6 +3,7 @@ import { reactive, ref, watch } from 'vue'
 import { Message, type FileItem } from '@arco-design/web-vue'
 import { api, type DataRecord } from '../api'
 import { useSessionStore } from '../stores/session'
+import DragPasteUpload from './DragPasteUpload.vue'
 
 const props = withDefaults(defineProps<{
   visible: boolean
@@ -86,7 +87,7 @@ async function submit() {
         <a-grid-item :span="2"><a-form-item label="问题描述" required><a-textarea v-model="form.description" :auto-size="{ minRows: 4, maxRows: 10 }" /></a-form-item></a-grid-item>
         <a-grid-item><a-form-item label="期望结果"><a-textarea v-model="form.expected_result" :auto-size="{ minRows: 3, maxRows: 6 }" /></a-form-item></a-grid-item>
         <a-grid-item><a-form-item label="实际结果"><a-textarea v-model="form.actual_result" :auto-size="{ minRows: 3, maxRows: 6 }" /></a-form-item></a-grid-item>
-        <a-grid-item :span="2"><a-form-item label="附件"><a-upload v-model:file-list="files" multiple draggable :auto-upload="false" /></a-form-item></a-grid-item>
+        <a-grid-item :span="2"><a-form-item label="附件"><DragPasteUpload v-model="files" /></a-form-item></a-grid-item>
       </a-grid>
     </a-form>
   </a-modal>
