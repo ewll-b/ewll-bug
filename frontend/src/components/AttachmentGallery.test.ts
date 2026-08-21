@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import AttachmentGallery from './AttachmentGallery.vue'
 
-const ImageStub = defineComponent({ emits: ['click'], template: '<button data-image @click="$emit(\'click\')">图片</button>' })
+const ImageStub = defineComponent({ template: '<span data-image>图片</span>' })
 const PreviewStub = defineComponent({ props: ['visible', 'current', 'srcList'], template: '<div data-preview>{{ visible }}|{{ current }}|{{ srcList?.join(\',\') }}</div>' })
 
 describe('AttachmentGallery', () => {
@@ -17,7 +17,7 @@ describe('AttachmentGallery', () => {
       global: { stubs: { 'a-image': ImageStub, 'a-image-preview-group': PreviewStub, 'a-link': true, 'a-empty': true, IconFile: true } },
     })
 
-    await wrapper.findAll('[data-image]')[1].trigger('click')
+    await wrapper.findAll('.attachment-image-button')[1].trigger('click')
     expect(wrapper.find('[data-preview]').text()).toBe('true|1|/a.png,/b.png')
   })
 })
