@@ -15,6 +15,10 @@ cd ewll-bug
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+cd frontend
+npm ci
+VITE_BASE_PATH=/for-test/ npm run build
+cd ..
 ```
 
 ## 3. 配置运行环境
@@ -43,10 +47,10 @@ set +a
 
 > 测试报告机器人使用应用内定时线程触发。建议使用 1 个 gunicorn worker；如果服务器暂时仍是旧的 2 worker 配置，代码会通过数据库日期锁避免同一份日报重复发送。
 
-公司同一内网访问：
+后端只需监听本机端口，前端静态资源由 Nginx 提供：
 
 ```text
-http://服务器内网IP:5050
+http://服务器内网IP
 ```
 
 ## 5. systemd 后台运行
@@ -77,7 +81,43 @@ sudo systemctl enable --now ewll-bug
 sudo systemctl status ewll-bug
 ```
 
-## 6. test 发布目录注意事项
+## 6. Nginx 前后端分流
+
+以下配置让 Vue 路由回退到 `index.html`，并把 API、附件、静态资源及报告导出交给 Flask：
+
+```nginx
+server {
+    listen 80;
+    server_name _;
+
+    root /opt/ewll-bug/frontend/dist;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:5050;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location ~ ^/(attachments|static)/ {
+        proxy_pass http://127.0.0.1:5050;
+        proxy_set_header Host $host;
+    }
+
+    location = /reports/testing/export {
+        proxy_pass http://127.0.0.1:5050;
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+更新配置后先执行 `sudo nginx -t`，确认通过再 reload。
+
+## 7. test 发布目录注意事项
 
 test 机器如果使用 `/home/echooo/fed/ewll-bug-test/current` 作为当前发布目录，数据库和上传附件必须放在 `current` 外的 `shared` 目录，避免发布切换后读到新的空数据库或新的上传目录。可参考 `deploy/ewll-bug-test.env.example`：
 
@@ -92,6 +132,17 @@ test 的 systemd 服务建议只使用 1 个 gunicorn worker：
 ExecStart=/home/echooo/fed/ewll-bug-test/current/.venv/bin/gunicorn -w 1 -b 127.0.0.1:5051 wsgi:app
 ```
 
+test 的 Nginx 必须把 `/for-test/assets/` 和 SPA 路由指向当前 release 的 `frontend/dist`，并仅把以下路径代理给 Gunicorn：
+
+```text
+/for-test/api/
+/for-test/attachments/
+/for-test/static/
+/for-test/reports/testing/export
+```
+
+发布前检查 `frontend/dist/index.html` 中的资源地址以 `/for-test/assets/` 开头；否则页面会在子路径下加载失败。
+
 如果历史数据已经落在 `current/data/bug_platform.db`，先停服务，再把数据库迁移到固定目录，最后重启服务：
 
 ```bash
@@ -102,7 +153,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart ewll-bug-test
 ```
 
-## 7. 必须备份的数据
+## 8. 必须备份的数据
 
 定期备份：
 

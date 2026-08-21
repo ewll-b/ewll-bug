@@ -1,0 +1,37 @@
+import { apiGet, apiPost } from './http'
+
+export type DataRecord = Record<string, any>
+
+export const api = {
+  login: (payload: { username: string; password: string }) => apiPost<DataRecord>('/auth/login', payload),
+  logout: () => apiPost('/auth/logout'),
+  bootstrap: () => apiGet<DataRecord>('/bootstrap'),
+  switchProject: (projectId: number) => apiPost('/projects/current', { project_id: projectId }),
+  bugs: (params?: DataRecord) => apiGet<DataRecord>('/bugs', params),
+  bug: (id: number) => apiGet<DataRecord>(`/bugs/${id}`),
+  createBug: (form: FormData) => apiPost<DataRecord>('/bugs', form),
+  editBug: (id: number, form: FormData) => apiPost<DataRecord>(`/bugs/${id}/edit`, form),
+  bugAction: (id: number, form: FormData) => apiPost<DataRecord>(`/bugs/${id}/actions`, form),
+  deleteBug: (id: number) => apiPost<DataRecord>(`/bugs/${id}/delete`, new FormData()),
+  addComment: (id: number, form: FormData) => apiPost<DataRecord>(`/bugs/${id}/comments`, form),
+  deleteComment: (bugId: number, commentId: number) => apiPost(`/bugs/${bugId}/comments/${commentId}/delete`, new FormData()),
+  todos: () => apiGet<DataRecord>('/todos'),
+  notifications: (state = '') => apiGet<DataRecord>('/notifications', { state }),
+  readNotification: (id: number) => apiPost<DataRecord>(`/notifications/${id}/read`),
+  readAllNotifications: () => apiPost<DataRecord>('/notifications/read-all'),
+  cases: (version = '') => apiGet<DataRecord>('/cases', { version }),
+  caseDocument: (id: number) => apiGet<DataRecord>(`/cases/${id}`),
+  autosaveCase: (id: number, form: FormData) => apiPost<DataRecord>(`/cases/${id}/autosave`, form),
+  manageCases: (form: FormData) => apiPost<DataRecord>('/cases/manage', form),
+  uploadCases: (form: FormData) => apiPost<DataRecord>('/cases/upload', form),
+  requirements: (params?: DataRecord) => apiGet<DataRecord>('/requirements', params),
+  requirement: (id: number) => apiGet<DataRecord>(`/requirements/${id}`),
+  createRequirement: (form: FormData) => apiPost<DataRecord>('/requirements', form),
+  editRequirement: (id: number, form: FormData) => apiPost<DataRecord>(`/requirements/${id}/edit`, form),
+  deleteRequirement: (id: number) => apiPost<DataRecord>(`/requirements/${id}/delete`, new FormData()),
+  report: (params?: DataRecord) => apiGet<DataRecord>('/reports/testing', params),
+  profile: () => apiGet<DataRecord>('/profile'),
+  updateProfile: (form: FormData) => apiPost<DataRecord>('/profile', form),
+  admin: () => apiGet<DataRecord>('/admin'),
+  adminAction: (form: FormData) => apiPost<DataRecord>('/admin/actions', form),
+}

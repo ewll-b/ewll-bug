@@ -246,6 +246,118 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login", response.headers["Location"])
 
+    def test_v1_api_requires_login(self) -> None:
+        response = self.client.get("/api/v1/bootstrap")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.get_json()["ok"])
+
+    def test_v1_api_login_and_bootstrap(self) -> None:
+        login_response = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "lit", "password": "123456"},
+        )
+
+        self.assertEqual(login_response.status_code, 200)
+        self.assertTrue(login_response.get_json()["ok"])
+        response = self.client.get("/api/v1/bootstrap")
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["data"]["user"]["username"], "lit")
+        self.assertTrue(payload["data"]["projects"])
+        self.assertNotIn("password", payload["data"]["user"])
+
+    def test_v1_api_bug_list_and_detail(self) -> None:
+        self.login_as("lit", "123456")
+
+        list_response = self.client.get("/api/v1/bugs")
+        list_payload = list_response.get_json()["data"]
+        self.assertEqual(list_response.status_code, 200)
+        self.assertTrue(list_payload["page"]["items"])
+        bug_id = int(list_payload["page"]["items"][0]["id"])
+        detail_response = self.client.get(f"/api/v1/bugs/{bug_id}")
+        detail_payload = detail_response.get_json()["data"]
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(int(detail_payload["bug"]["id"]), bug_id)
+        self.assertIn("permissions", detail_payload)
+
+    def test_v1_api_switches_project(self) -> None:
+        self.login_as("lit", "123456")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            project_id = int(conn.execute("SELECT id FROM projects ORDER BY id DESC LIMIT 1").fetchone()[0])
+
+        response = self.client.post("/api/v1/projects/current", json={"project_id": project_id})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["data"]["current_project"]["id"], project_id)
+
+    def test_v1_admin_api_hides_sensitive_notification_values(self) -> None:
+        self.login_as("admin", "admin123")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.execute(
+                "UPDATE projects SET bug_notify_webhook = ?, bug_notify_secret = ? WHERE id = 1",
+                ("https://example.test/private-hook", "private-project-secret"),
+            )
+            conn.execute(
+                "UPDATE mail_settings SET report_notify_webhook = ?, report_notify_secret = ? WHERE id = 1",
+                ("https://example.test/report-hook", "private-report-secret"),
+            )
+            conn.commit()
+
+        response = self.client.get("/api/v1/admin")
+        response_text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("private-hook", response_text)
+        self.assertNotIn("private-project-secret", response_text)
+        self.assertNotIn("report-hook", response_text)
+        self.assertNotIn("private-report-secret", response_text)
+        self.assertTrue(response.get_json()["data"]["projects"][0]["bug_notify_webhook_configured"])
+
+    def test_v1_admin_project_update_preserves_hidden_notification_settings(self) -> None:
+        self.login_as("admin", "admin123")
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            project = conn.execute("SELECT * FROM projects WHERE id = 1").fetchone()
+            conn.execute(
+                "UPDATE projects SET bug_notify_webhook = ?, bug_notify_secret = ? WHERE id = 1",
+                ("https://example.test/private-hook", "private-project-secret"),
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO project_bug_notify_rules (
+                    project_id, module, enabled, webhook_url, secret, created_at, updated_at
+                ) VALUES (1, 'WEB', 1, 'https://example.test/web-hook', 'private-rule-secret', ?, ?)
+                """,
+                ("2026-08-21 10:00:00", "2026-08-21 10:00:00"),
+            )
+            conn.commit()
+
+        response = self.client.post(
+            "/api/v1/admin/actions",
+            data={
+                "entity": "project",
+                "action": "update",
+                "project_id": "1",
+                "name": project["name"],
+                "description": project["description"],
+                "bug_notify_enabled": "1",
+                "bug_notify_base_url": project["bug_notify_base_url"] or "",
+                "preserve_notify_rules": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            saved_project = conn.execute(
+                "SELECT bug_notify_webhook, bug_notify_secret FROM projects WHERE id = 1"
+            ).fetchone()
+            saved_rule = conn.execute(
+                "SELECT webhook_url, secret FROM project_bug_notify_rules WHERE project_id = 1 AND module = 'WEB'"
+            ).fetchone()
+        self.assertEqual(saved_project, ("https://example.test/private-hook", "private-project-secret"))
+        self.assertEqual(saved_rule, ("https://example.test/web-hook", "private-rule-secret"))
+
     def test_login_redirect_returns_to_original_detail_page(self) -> None:
         response = self.client.get("/bugs/1?tab=detail", follow_redirects=False)
         self.assertEqual(response.status_code, 302)

@@ -29,7 +29,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/mpl")
 os.environ.setdefault("XDG_CACHE_HOME", "/private/tmp")
 
 import openpyxl
-from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, Response, flash, g, get_flashed_messages, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
@@ -1339,9 +1339,11 @@ def create_app(test_config: dict | None = None) -> Flask:
         db.commit()
 
     def update_group_report_settings(form) -> None:
+        current_settings = fetch_group_report_settings()
         enabled = 1 if form.get("enabled") == "1" else 0
-        webhook_url = form.get("webhook_url", "").strip()
-        secret = form.get("secret", "").strip()
+        # 前端不回显敏感值，未提交时必须保留数据库中的原配置。
+        webhook_url = form.get("webhook_url", current_settings["webhook_url"]).strip()
+        secret = form.get("secret", current_settings["secret"]).strip()
         send_time = form.get("send_time", "").strip() or DEFAULT_GROUP_REPORT_SETTINGS["send_time"]
         project_id_text = form.get("project_id", "").strip()
         version = form.get("version", "").strip()
@@ -1350,7 +1352,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         tracking_progress = form.get("tracking_progress", "").strip()
         message_format = form.get("message_format", DEFAULT_GROUP_REPORT_SETTINGS["message_format"]).strip()
         lark_app_id = form.get("lark_app_id", "").strip()
-        lark_app_secret = form.get("lark_app_secret", "").strip()
+        lark_app_secret = form.get("lark_app_secret", current_settings["lark_app_secret"]).strip()
         if message_format not in GROUP_REPORT_MESSAGE_FORMATS:
             raise ValueError("请选择有效的群测试报告发送格式。")
         if webhook_url and not webhook_url.startswith(("https://", "http://")):
@@ -6744,7 +6746,14 @@ def create_app(test_config: dict | None = None) -> Flask:
             g.current_user = fetch_user(int(user_id))
         endpoint = request.endpoint or ""
         # 郑敬佩待办 JSON 接口按需求开放匿名访问。
-        public_endpoints = {"login", "static", "zhengjingpei_todos_api", "zhengjingpei_todo_status_api"}
+        public_endpoints = {
+            "login",
+            "static",
+            "api_health",
+            "api_login",
+            "zhengjingpei_todos_api",
+            "zhengjingpei_todo_status_api",
+        }
         if endpoint not in public_endpoints and g.current_user is None:
             if request.path.startswith("/api/"):
                 return jsonify({"ok": False, "message": "请先登录。"}), 401
@@ -8333,6 +8342,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             action = request.form.get("action", "").strip()
             if entity == "project":
                 project_id = int(request.form.get("project_id", "0") or 0)
+                existing_project = fetch_project(project_id) if action == "update" else None
                 name = request.form.get("name", "").strip()
                 description = request.form.get("description", "").strip()
                 bug_notify_enabled = 1 if request.form.get("bug_notify_enabled") == "1" else 0
@@ -8340,6 +8350,13 @@ def create_app(test_config: dict | None = None) -> Flask:
                 bug_notify_secret = request.form.get("bug_notify_secret", "").strip()
                 bug_notify_base_url = request.form.get("bug_notify_base_url", "").strip()
                 bug_notify_rules: list[dict[str, object]] = []
+                preserve_notify_rules = request.form.get("preserve_notify_rules") == "1"
+                # SPA 不回显敏感配置，字段缺省时沿用现有值。
+                if existing_project is not None:
+                    if "bug_notify_webhook" not in request.form:
+                        bug_notify_webhook = str(existing_project["bug_notify_webhook"] or "")
+                    if "bug_notify_secret" not in request.form:
+                        bug_notify_secret = str(existing_project["bug_notify_secret"] or "")
                 if action in {"create", "update"}:
                     try:
                         validate_project_bug_notify_settings(
@@ -8348,7 +8365,8 @@ def create_app(test_config: dict | None = None) -> Flask:
                             bug_notify_base_url,
                             label="默认新建 Bug 群通知",
                         )
-                        bug_notify_rules = parse_project_bug_notify_rule_form(request.form)
+                        if not preserve_notify_rules:
+                            bug_notify_rules = parse_project_bug_notify_rule_form(request.form)
                     except ValueError as exc:
                         flash(str(exc), "error")
                         return redirect(redirect_target)
@@ -8380,7 +8398,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                         db.commit()
                         flash("项目已创建。", "success")
                 elif action == "update":
-                    project = fetch_project(project_id)
+                    project = existing_project
                     if project is None:
                         flash("未找到对应项目。", "error")
                     elif not name:
@@ -8405,7 +8423,8 @@ def create_app(test_config: dict | None = None) -> Flask:
                                 project_id,
                             ),
                         )
-                        save_project_bug_notify_rules(project_id, bug_notify_rules)
+                        if not preserve_notify_rules:
+                            save_project_bug_notify_rules(project_id, bug_notify_rules)
                         db.commit()
                         if current_project_id() == project_id:
                             set_current_project(project_id)
@@ -8603,6 +8622,383 @@ def create_app(test_config: dict | None = None) -> Flask:
             target_user=target_user,
             usage_count=user_usage_count(user_id),
         )
+
+    def api_json_value(value: Any) -> Any:
+        """将数据库行和嵌套集合转换为稳定的 JSON 数据。"""
+        if isinstance(value, sqlite3.Row):
+            return {key: api_json_value(value[key]) for key in value.keys()}
+        if isinstance(value, dict):
+            return {str(key): api_json_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [api_json_value(item) for item in value]
+        if isinstance(value, Path):
+            return str(value)
+        return value
+
+    def api_user_value(user: sqlite3.Row | None) -> dict[str, Any] | None:
+        if user is None:
+            return None
+        return {
+            "id": int(user["id"]),
+            "name": user["name"] or "",
+            "role": user["role"] or "",
+            "role_code": user["role_code"] or "",
+            "account_type": user["account_type"] or "member",
+            "username": user["username"] or "",
+            "email": user["email"] or "",
+            "created_at": user["created_at"] or "",
+        }
+
+    def api_project_value(project: sqlite3.Row | None, include_settings: bool = False) -> dict[str, Any] | None:
+        if project is None:
+            return None
+        payload = {
+            "id": int(project["id"]),
+            "name": project["name"] or "",
+            "description": project["description"] or "",
+            "bug_notify_enabled": bool(project["bug_notify_enabled"]),
+            "created_at": project["created_at"] or "",
+        }
+        if include_settings:
+            payload.update(
+                {
+                    "bug_notify_webhook_configured": bool(project["bug_notify_webhook"]),
+                    "bug_notify_secret_configured": bool(project["bug_notify_secret"]),
+                    "bug_notify_base_url": project["bug_notify_base_url"] or "",
+                    "bug_notify_last_sent_at": project["bug_notify_last_sent_at"] or "",
+                    "bug_notify_last_result": project["bug_notify_last_result"] or "",
+                }
+            )
+        return payload
+
+    def api_attachment_value(attachment: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": int(attachment["id"]),
+            "filename": attachment["filename"] or "",
+            "content_type": attachment["content_type"] or "",
+            "source_field": attachment["source_field"] or "attachments",
+            "is_image": is_image_attachment(attachment),
+            "url": url_for("view_attachment", attachment_id=int(attachment["id"])),
+        }
+
+    def api_legacy_action_result(result: Any) -> Response | tuple[Response, int]:
+        """兼容旧业务处理函数，并把表单跳转转换为前端可消费的 JSON。"""
+        status_code = 200
+        response = result
+        if isinstance(result, tuple):
+            response = result[0]
+            status_code = int(result[1])
+        if isinstance(response, Response) and response.is_json:
+            return response, status_code
+        messages = get_flashed_messages(with_categories=True)
+        has_error = any(category == "error" for category, _message in messages)
+        payload = {
+            "ok": not has_error,
+            "message": messages[-1][1] if messages else ("操作成功。" if not has_error else "操作失败。"),
+            "messages": [{"type": category, "text": message} for category, message in messages],
+            "redirect_url": response.location if isinstance(response, Response) and response.location else "",
+        }
+        return jsonify(payload), 400 if has_error else status_code
+
+    @app.get("/api/v1/health")
+    def api_health() -> Response:
+        return jsonify({"ok": True, "service": "ewll-bug", "version": "v1"})
+
+    @app.post("/api/v1/auth/login")
+    def api_login() -> tuple[Response, int] | Response:
+        payload = request.get_json(silent=True) if request.is_json else request.form
+        username = str(payload.get("username", "") or "").strip()
+        password = str(payload.get("password", "") or "").strip()
+        user = fetch_user_by_credentials(username, password)
+        if user is None:
+            return jsonify({"ok": False, "message": "账号或密码错误。"}), 401
+        session["user_id"] = int(user["id"])
+        default_project_id = default_project_id_for_user(int(user["id"]))
+        if default_project_id is not None:
+            session["project_id"] = default_project_id
+        return jsonify({"ok": True, "message": "登录成功。", "data": {"user": api_user_value(user)}})
+
+    @app.post("/api/v1/auth/logout")
+    def api_logout() -> Response:
+        session.clear()
+        return jsonify({"ok": True, "message": "已退出登录。"})
+
+    @app.get("/api/v1/bootstrap")
+    def api_bootstrap() -> Response:
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "user": api_user_value(g.current_user),
+                    "current_project": api_project_value(g.current_project),
+                    "projects": [api_project_value(item) for item in g.projects],
+                    "summary": api_json_value(fetch_summary()),
+                    "is_admin": is_admin(),
+                    "options": {
+                        "statuses": [{"value": code, "label": label} for code, label in STATUS_OPTIONS],
+                        "severities": BUG_SEVERITY_OPTIONS,
+                        "priorities": BUG_PRIORITY_OPTIONS,
+                        "platforms": BUG_PLATFORM_OPTIONS,
+                        "requirement_statuses": [
+                            {"value": code, "label": label} for code, label in REQUIREMENT_STATUS_OPTIONS
+                        ],
+                        "roles": [{"value": code, "label": label} for code, label in ROLE_OPTIONS],
+                    },
+                },
+            }
+        )
+
+    @app.post("/api/v1/projects/current")
+    def api_switch_project() -> tuple[Response, int] | Response:
+        payload = request.get_json(silent=True) if request.is_json else request.form
+        project_id = int(payload.get("project_id", 0) or 0)
+        project = fetch_project(project_id)
+        if project is None:
+            return jsonify({"ok": False, "message": "项目不存在。"}), 404
+        set_current_project(project_id)
+        return jsonify({"ok": True, "data": {"current_project": api_project_value(project)}})
+
+    @app.get("/api/v1/bugs")
+    def api_bug_list() -> Response:
+        filters = fetch_filters()
+        page = request_page()
+        bug_page = fetch_bug_page(filters, page)
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "page": api_json_value(bug_page),
+                    "filters": filters,
+                    "summary": fetch_bug_summary(filters),
+                    "versions": fetch_bug_versions(),
+                    "users": [api_user_value(item) for item in fetch_bug_assignee_users()],
+                    "requirements": api_json_value(fetch_requirements()),
+                    "cases": api_json_value(fetch_cases_for_project()),
+                },
+            }
+        )
+
+    @app.post("/api/v1/bugs")
+    def api_create_bug() -> Response | tuple[Response, int]:
+        return api_legacy_action_result(create_bug())
+
+    @app.get("/api/v1/bugs/<int:bug_id>")
+    def api_bug_detail(bug_id: int) -> tuple[Response, int] | Response:
+        bug = fetch_bug(bug_id)
+        if bug is None:
+            return jsonify({"ok": False, "message": "未找到对应的 Bug。"}), 404
+        history = fetch_bug_history(bug_id)
+        comments = fetch_bug_comments(bug_id)
+        attachments = fetch_bug_attachments(bug_id)
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "bug": api_json_value(bug),
+                    "history": api_json_value(history),
+                    "comments": api_json_value(build_bug_comment_threads(comments, fetch_users(), fetch_comment_mention_states(bug_id))),
+                    "mention_users": [api_user_value(item) for item in fetch_users()],
+                    "attachments": [api_attachment_value(item) for item in attachments],
+                    "users": [api_user_value(item) for item in fetch_bug_assignee_users()],
+                    "requirements": api_json_value(fetch_requirements()),
+                    "cases": api_json_value(fetch_cases_for_project()),
+                    "permissions": {
+                        "can_manage": can_manage_bug(bug),
+                        "can_edit_platform": can_edit_bug_platform(bug),
+                    },
+                    "allowed_statuses": allowed_status_transitions(str(bug["status"] or "")),
+                },
+            }
+        )
+
+    @app.post("/api/v1/bugs/<int:bug_id>/edit")
+    def api_edit_bug(bug_id: int) -> Response | tuple[Response, int]:
+        return api_legacy_action_result(edit_bug(bug_id))
+
+    @app.post("/api/v1/bugs/<int:bug_id>/actions")
+    def api_update_bug(bug_id: int) -> Response | tuple[Response, int]:
+        return api_legacy_action_result(update_bug(bug_id))
+
+    @app.post("/api/v1/bugs/<int:bug_id>/delete")
+    def api_delete_bug(bug_id: int) -> Response | tuple[Response, int]:
+        return api_legacy_action_result(delete_bug(bug_id))
+
+    @app.post("/api/v1/bugs/<int:bug_id>/comments")
+    def api_add_bug_comment(bug_id: int) -> Response | tuple[Response, int]:
+        return api_legacy_action_result(add_bug_comment(bug_id))
+
+    @app.post("/api/v1/bugs/<int:bug_id>/comments/<int:comment_id>/delete")
+    def api_delete_bug_comment(bug_id: int, comment_id: int) -> Response | tuple[Response, int]:
+        return api_legacy_action_result(delete_bug_comment(bug_id, comment_id))
+
+    @app.get("/api/v1/todos")
+    def api_todos() -> Response:
+        todos = fetch_my_todos()
+        return jsonify({"ok": True, "data": {"items": api_json_value(todos), "count": len(todos)}})
+
+    @app.get("/api/v1/notifications")
+    def api_notifications() -> Response:
+        state = request.args.get("state", "").strip()
+        state = state if state in {"", "unread"} else ""
+        user_id = int(g.current_user["id"])
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "items": api_json_value(fetch_user_notifications(user_id, state=state)),
+                    "state": state,
+                    "unread_count": count_user_notifications(user_id, unread_only=True),
+                    "total_count": count_user_notifications(user_id),
+                },
+            }
+        )
+
+    @app.post("/api/v1/notifications/read-all")
+    def api_notifications_read_all() -> Response:
+        count = mark_all_notifications_read(int(g.current_user["id"]))
+        return jsonify({"ok": True, "message": f"已将 {count} 条消息标为已读。", "data": {"count": count}})
+
+    @app.post("/api/v1/notifications/<int:notification_id>/read")
+    def api_notification_read(notification_id: int) -> tuple[Response, int] | Response:
+        user_id = int(g.current_user["id"])
+        notification = fetch_notification(notification_id, user_id)
+        if notification is None:
+            return jsonify({"ok": False, "message": "消息不存在或已删除。"}), 404
+        mark_notification_read(notification_id, user_id)
+        return jsonify({"ok": True, "data": {"link_path": notification["link_path"] or ""}})
+
+    @app.get("/api/v1/cases")
+    def api_cases() -> Response:
+        version = request.args.get("version", "").strip()
+        documents = fetch_case_documents(version)
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "documents": api_json_value(documents),
+                    "tree": api_json_value(build_case_tree(documents)),
+                    "versions": fetch_case_versions(),
+                    "distribution": api_json_value(execution_distribution(version=version)),
+                },
+            }
+        )
+
+    @app.get("/api/v1/cases/<int:document_id>")
+    def api_case_document(document_id: int) -> tuple[Response, int] | Response:
+        bundle = fetch_case_document_bundle(document_id)
+        if bundle is None:
+            return jsonify({"ok": False, "message": "未找到对应的在线文档。"}), 404
+        return jsonify({"ok": True, "data": api_json_value(bundle)})
+
+    @app.post("/api/v1/cases/<int:document_id>/autosave")
+    def api_case_autosave(document_id: int) -> Response | tuple[Response, int]:
+        return autosave_case_document(document_id)
+
+    @app.post("/api/v1/cases/manage")
+    def api_manage_cases() -> Response | tuple[Response, int]:
+        return api_legacy_action_result(manage_case_library())
+
+    @app.post("/api/v1/cases/upload")
+    def api_upload_cases() -> Response | tuple[Response, int]:
+        return api_legacy_action_result(upload_cases())
+
+    @app.get("/api/v1/requirements")
+    def api_requirements() -> Response:
+        filters = {
+            "keyword": request.args.get("keyword", "").strip(),
+            "version": request.args.get("version", "").strip(),
+        }
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "page": api_json_value(fetch_requirement_page(filters, request_page())),
+                    "filters": filters,
+                    "versions": fetch_requirement_versions(),
+                    "summary": fetch_requirement_summary(),
+                },
+            }
+        )
+
+    @app.post("/api/v1/requirements")
+    def api_create_requirement() -> Response | tuple[Response, int]:
+        return api_legacy_action_result(create_requirement())
+
+    @app.get("/api/v1/requirements/<int:requirement_id>")
+    def api_requirement_detail(requirement_id: int) -> tuple[Response, int] | Response:
+        requirement = fetch_requirement(requirement_id)
+        if requirement is None:
+            return jsonify({"ok": False, "message": "未找到对应需求。"}), 404
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "requirement": api_json_value(requirement),
+                    "bugs": api_json_value(fetch_requirement_bugs(requirement_id)),
+                    "can_manage": can_manage_requirement(requirement),
+                },
+            }
+        )
+
+    @app.post("/api/v1/requirements/<int:requirement_id>/edit")
+    def api_edit_requirement(requirement_id: int) -> Response | tuple[Response, int]:
+        return api_legacy_action_result(update_requirement(requirement_id))
+
+    @app.post("/api/v1/requirements/<int:requirement_id>/delete")
+    def api_delete_requirement(requirement_id: int) -> Response | tuple[Response, int]:
+        return api_legacy_action_result(delete_requirement(requirement_id))
+
+    @app.get("/api/v1/reports/testing")
+    def api_testing_report() -> Response:
+        version = request.args.get("version", "").strip()
+        return jsonify({"ok": True, "data": api_json_value(fetch_report_data(version, request_page()))})
+
+    @app.get("/api/v1/profile")
+    def api_profile() -> Response:
+        return jsonify({"ok": True, "data": {"user": api_user_value(fetch_user(int(g.current_user["id"])))}})
+
+    @app.post("/api/v1/profile")
+    def api_update_profile() -> Response | tuple[Response, int]:
+        return api_legacy_action_result(profile_page())
+
+    @app.get("/api/v1/admin")
+    def api_admin() -> tuple[Response, int] | Response:
+        if not is_admin():
+            return jsonify({"ok": False, "message": "仅管理员可访问。"}), 403
+        projects = fetch_projects()
+        users = fetch_users()
+        report_notify_settings = fetch_group_report_settings()
+        report_notify_public = {
+            key: value
+            for key, value in report_notify_settings.items()
+            if "secret" not in key and "webhook" not in key and "app_secret" not in key
+        }
+        report_notify_public.update(
+            {
+                "webhook_configured": bool(report_notify_settings["webhook_url"]),
+                "secret_configured": bool(report_notify_settings["secret"]),
+                "lark_app_secret_configured": bool(report_notify_settings["lark_app_secret"]),
+            }
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "cards": api_json_value(admin_dashboard_cards()),
+                    "projects": [api_project_value(item, include_settings=True) for item in projects],
+                    "users": [api_user_value(item) for item in users],
+                    "project_usage": {str(item["id"]): project_usage_count(int(item["id"])) for item in projects},
+                    "user_usage": {str(item["id"]): user_usage_count(int(item["id"])) for item in users},
+                    "report_notify": report_notify_public,
+                },
+            }
+        )
+
+    @app.post("/api/v1/admin/actions")
+    def api_admin_action() -> Response | tuple[Response, int]:
+        if not is_admin():
+            return jsonify({"ok": False, "message": "仅管理员可访问。"}), 403
+        return api_legacy_action_result(admin_center())
 
     with app.app_context():
         init_db()

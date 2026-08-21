@@ -1,6 +1,6 @@
 # alvinsclubBUG管理平台
 
-一个面向 100 人以内团队的轻量 Bug 管理平台，使用 `Python + Flask + SQLite` 构建，强调简洁、方便、开箱可用。
+一个面向 100 人以内团队的轻量 Bug 管理平台。项目采用前后端分离架构：后端使用 `Python + Flask + SQLite` 提供 `/api/v1` JSON API，前端使用 `Vue 3 + TypeScript + Arco Design Vue + Tailwind CSS + Axios`。
 
 ## 已实现能力
 
@@ -23,13 +23,32 @@
 
 ## 本地运行
 
+先启动后端：
+
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python app.py
 ```
 
-本机打开浏览器访问 [http://127.0.0.1:5050](http://127.0.0.1:5050)
+再启动前端开发服务：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+本机打开浏览器访问 [http://127.0.0.1:5173](http://127.0.0.1:5173)。Vite 会将 API、附件和报告导出请求代理到 `http://127.0.0.1:5050`。
+
+原 Flask 页面仍可通过 [http://127.0.0.1:5050](http://127.0.0.1:5050) 访问，用于兼容现有部署和回滚。
+
+部署到 `/for-test/` 等子路径时必须显式设置前端基路径：
+
+```bash
+cd frontend
+VITE_BASE_PATH=/for-test/ npm run build
+```
 
 同一局域网内的其他人可以访问 `http://你的电脑IP:5050`，例如 `http://192.168.0.161:5050`。
 
@@ -45,6 +64,11 @@ python3 -m venv .venv
 
 ```text
 app.py
+frontend/
+  src/api/           Axios 请求封装
+  src/components/    可复用弹窗、表单和图片预览组件
+  src/layouts/       全局菜单与页面框架
+  src/pages/         独立业务页面
 templates/
 static/
 data/
@@ -54,7 +78,15 @@ tests/
 
 ## 部署到公司内网
 
-正式部署建议使用 `gunicorn` 运行：
+构建前端静态资源：
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+后端建议使用 `gunicorn` 运行：
 
 ```bash
 cp .env.example .env
@@ -67,6 +99,15 @@ set +a
 测试报告机器人依赖应用内定时线程，部署时建议在 `.env` 中保留 `START_SCHEDULER=1` 并使用 1 个 gunicorn worker；如果服务器暂时仍是旧的 2 worker 配置，代码会通过数据库日期锁避免同一份日报重复发送。
 
 更完整的服务器部署、systemd 后台运行和备份说明见 [DEPLOY.md](DEPLOY.md)。
+
+## 前端质量检查
+
+```bash
+cd frontend
+npm run typecheck
+npm test
+npm run build
+```
 
 ## 数据安全
 

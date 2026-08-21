@@ -1,5 +1,8 @@
 # Python
 __pycache__/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
 *.py[cod]
 *.pyo
 *.pyd
@@ -31,6 +34,8 @@ uploads/*
 # Logs and temporary outputs
 *.log
 *.pid
+.playwright-cli/
+output/
 tmp/
 temp/
 
