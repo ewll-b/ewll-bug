@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import {
   IconBug, IconCalendar, IconCheckCircle, IconDashboard, IconFolder,
-  IconMenuFold, IconMenuUnfold, IconMoon, IconNotification, IconSettings,
+  IconMenuUnfold, IconMoon, IconNotification, IconSettings,
   IconSun, IconUser,
 } from '@arco-design/web-vue/es/icon'
 import { api } from '../api'
@@ -103,7 +103,7 @@ onBeforeUnmount(() => session.stopSummaryAutoRefresh())
       </div>
     </a-layout-header>
     <a-layout>
-      <a-layout-sider class="app-sider" :collapsed="collapsed" collapsible :width="220" :collapsed-width="56">
+      <a-layout-sider v-model:collapsed="collapsed" class="app-sider" collapsible :width="220" :collapsed-width="56">
         <a-menu :selected-keys="[selectedKey]" @menu-item-click="navigate">
           <a-menu-item v-for="item in menuItems" :key="item.key">
             <template #icon><component :is="item.icon" /></template>
@@ -111,10 +111,6 @@ onBeforeUnmount(() => session.stopSummaryAutoRefresh())
             <a-badge v-if="item.badge > 0" :count="item.badge" :max-count="99" />
           </a-menu-item>
         </a-menu>
-        <a-button class="collapse-button" type="text" shape="circle" :aria-label="collapsed ? '展开导航' : '收起导航'" @click="collapsed = !collapsed">
-          <IconMenuUnfold v-if="collapsed" />
-          <IconMenuFold v-else />
-        </a-button>
       </a-layout-sider>
       <a-layout-content class="app-content">
         <slot />
@@ -140,7 +136,6 @@ onBeforeUnmount(() => session.stopSummaryAutoRefresh())
 .brand-name { font-size: 16px; font-weight: 600; white-space: nowrap; }
 .project-select { width: 190px; }
 .app-sider { position: sticky; top: 56px; height: calc(100vh - 56px); padding-top: 10px; background: var(--sider-bg); border-right: 1px solid var(--panel-border); }
-.collapse-button { position: absolute; right: 10px; bottom: 16px; }
 /* 主内容始终占满除导航外的浏览器可用区域。 */
 .app-content { width: 100%; min-width: 0; min-height: calc(100vh - 56px); padding: 20px; overflow: hidden; }
 .mobile-menu-button { display: none; }

@@ -2,7 +2,12 @@
 import CaseDocumentPage from '../pages/CaseDocumentPage.vue'
 
 defineProps<{ visible: boolean; documentId?: number }>()
-const emit = defineEmits<{ 'update:visible': [value: boolean] }>()
+const emit = defineEmits<{ 'update:visible': [value: boolean]; changed: []; deleted: [] }>()
+
+function handleDeleted() {
+  emit('update:visible', false)
+  emit('deleted')
+}
 </script>
 
 <template>
@@ -14,6 +19,6 @@ const emit = defineEmits<{ 'update:visible': [value: boolean] }>()
     unmount-on-close
     @update:visible="emit('update:visible', $event)"
   >
-    <CaseDocumentPage v-if="documentId" :entity-id="documentId" embedded />
+    <CaseDocumentPage v-if="documentId" :entity-id="documentId" embedded @changed="emit('changed')" @deleted="handleDeleted" />
   </a-drawer>
 </template>

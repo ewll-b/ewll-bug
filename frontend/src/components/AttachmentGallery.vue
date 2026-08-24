@@ -28,14 +28,12 @@ function openPreview(items: DataRecord[], item: DataRecord) {
         <!-- 原生按钮统一承接单击，避免图片组件内部事件造成双击体验。 -->
         <a-image
           :src="item.url"
-          :title="item.filename"
           width="100%"
           height="112"
           fit="cover"
           :preview="false"
           class="attachment-image"
         />
-        <span>{{ item.filename }}</span>
       </button>
       <a-link v-else :href="item.url" target="_blank" class="file-link"><IconFile />{{ item.filename }}</a-link>
     </template>
@@ -50,9 +48,8 @@ function openPreview(items: DataRecord[], item: DataRecord) {
 </template>
 
 <style scoped>
-.attachment-image-button { min-width: 0; padding: 0; display: grid; gap: 7px; color: inherit; text-align: left; background: transparent; border: 0; cursor: zoom-in; }
+.attachment-image-button { min-width: 0; padding: 0; display: block; color: inherit; text-align: left; background: transparent; border: 0; cursor: zoom-in; }
 .attachment-image { border-radius: 4px; overflow: hidden; border: 1px solid var(--panel-border); }
-.attachment-image-button span { overflow: hidden; color: var(--muted-text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-image-button:focus-visible { outline: 2px solid rgb(var(--primary-3)); outline-offset: 2px; }
 .file-link { min-height: 44px; padding: 10px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--panel-border); border-radius: 4px; overflow-wrap: anywhere; }
 </style>

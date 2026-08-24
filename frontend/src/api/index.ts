@@ -23,6 +23,7 @@ export const api = {
   cases: (version = '') => apiGet<DataRecord>('/cases', { version }),
   caseDocument: (id: number) => apiGet<DataRecord>(`/cases/${id}`),
   autosaveCase: (id: number, form: FormData) => apiPost<DataRecord>(`/cases/${id}/autosave`, form),
+  deleteCaseItem: (documentId: number, caseId: number) => apiPost<DataRecord>(`/cases/${documentId}/items/${caseId}/delete`, new FormData()),
   manageCases: (form: FormData) => apiPost<DataRecord>('/cases/manage', form),
   uploadCases: (form: FormData) => apiPost<DataRecord>('/cases/upload', form),
   requirements: (params?: DataRecord) => apiGet<DataRecord>('/requirements', params),

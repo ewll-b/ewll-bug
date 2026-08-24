@@ -5,7 +5,7 @@ import { IconRefresh } from '@arco-design/web-vue/es/icon'
 import { api, type DataRecord } from '../api'
 import { useSessionStore } from '../stores/session'
 import PageHeader from '../components/PageHeader.vue'
-import StatusTag from '../components/StatusTag.vue'
+import StatusSelect from '../components/StatusSelect.vue'
 import BugDetailDrawer from '../components/BugDetailDrawer.vue'
 
 const session = useSessionStore()
@@ -45,11 +45,25 @@ onMounted(async () => { if (!session.ready) await session.load(); await load() }
     <PageHeader title="我的待办" description="展示当前账号在全部项目中的待处理缺陷"><a-button @click="load"><IconRefresh />刷新</a-button></PageHeader>
     <section class="page-panel">
       <a-table :columns="columns" :data="items" :loading="loading" :pagination="false" row-key="id" :scroll="{ x: 1000 }" stripe>
-        <template #bugNo="{ record }"><a-link class="table-link" @click="openDetail(Number(record.id))">{{ record.bug_no }}</a-link></template>
-        <template #title="{ record }"><a-link class="table-link" @click="openDetail(Number(record.id))">{{ record.title }}</a-link></template>
-        <template #status="{ record }"><a-select :model-value="record.status" size="small" @change="(value) => updateStatus(record, value)"><a-option v-for="item in session.options.statuses" :key="item.value" :value="item.value"><StatusTag :status="item.value" /></a-option></a-select></template>
+        <template #bugNo="{ record }"><a-link class="todo-bug-link" :title="record.bug_no" @click="openDetail(Number(record.id))">{{ record.bug_no }}</a-link></template>
+        <template #title="{ record }"><a-link class="todo-bug-link todo-title-link" :title="record.title" @click="openDetail(Number(record.id))">{{ record.title }}</a-link></template>
+        <template #status="{ record }"><StatusSelect :model-value="record.status" :options="session.options.statuses" size="small" @change="(value) => updateStatus(record, value)" /></template>
       </a-table>
     </section>
     <BugDetailDrawer v-model:visible="detailVisible" :bug-id="selectedBugId" @changed="load" @deleted="load" />
   </div>
 </template>
+
+<style scoped>
+.todo-bug-link {
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-1);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.todo-bug-link:hover { color: var(--color-text-1); }
+.todo-title-link { width: 100%; }
+</style>

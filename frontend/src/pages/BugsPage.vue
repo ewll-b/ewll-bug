@@ -6,7 +6,7 @@ import { IconPlus, IconRefresh, IconSearch } from '@arco-design/web-vue/es/icon'
 import { api, type DataRecord } from '../api'
 import { useSessionStore } from '../stores/session'
 import PageHeader from '../components/PageHeader.vue'
-import StatusTag from '../components/StatusTag.vue'
+import StatusSelect from '../components/StatusSelect.vue'
 import BugFormModal from '../components/BugFormModal.vue'
 import BugDetailDrawer from '../components/BugDetailDrawer.vue'
 
@@ -15,6 +15,7 @@ const router = useRouter()
 const session = useSessionStore()
 const loading = ref(false)
 const modalVisible = ref(false)
+const bugInitialValues = ref<DataRecord | null>(null)
 const detailVisible = ref(false)
 const selectedBugId = ref<number>()
 const data = ref<DataRecord>({ page: { items: [], total: 0, page: 1 }, summary: {}, versions: [], users: [], requirements: [], cases: [] })
@@ -44,7 +45,10 @@ function hydrateQuery() {
 
 async function load() {
   loading.value = true
-  try { data.value = await api.bugs({ ...filters }) } finally { loading.value = false }
+  try {
+    data.value = await api.bugs({ ...filters })
+    await openCreateBugFromCaseQuery()
+  } finally { loading.value = false }
 }
 
 async function search() {
@@ -69,6 +73,49 @@ async function changePage(page: number) {
 
 function openDetail(id: number) { selectedBugId.value = id; detailVisible.value = true }
 
+function failedPlatformForCase(caseItem: DataRecord) {
+  if (caseItem.android_result === 'failed') return 'Android'
+  if (caseItem.ios_result === 'failed') return 'iOS'
+  if (caseItem.h5_result === 'failed') return 'H5'
+  return ''
+}
+
+function buildBugInitialValuesFromCase(caseItem: DataRecord) {
+  const caseNo = String(caseItem.case_no || '').trim()
+  const caseTitle = String(caseItem.title || '').trim()
+  return {
+    title: caseNo && caseTitle ? `${caseNo} ${caseTitle}` : caseTitle || caseNo,
+    version: String(caseItem.version || '').trim(),
+    platform: failedPlatformForCase(caseItem),
+    severity: '高',
+    case_id: caseItem.id,
+    environment: String(caseItem.environment_info || '').trim(),
+    description: String(caseItem.steps || '').trim(),
+    expected_result: String(caseItem.expected_result || '').trim(),
+    actual_result: '',
+  }
+}
+
+function openCreateBug(initialValues: DataRecord | null = null) {
+  bugInitialValues.value = initialValues
+  modalVisible.value = true
+}
+
+async function openCreateBugFromCaseQuery() {
+  const caseId = Number(route.query.case_id || 0)
+  if (!caseId || modalVisible.value) return
+  const caseItem = data.value.cases.find((item: DataRecord) => Number(item.id) === caseId)
+  if (!caseItem) {
+    Message.warning('未找到要关联的用例，请确认当前项目是否正确。')
+    return
+  }
+  openCreateBug(buildBugInitialValuesFromCase(caseItem))
+  const query = { ...route.query }
+  delete query.case_id
+  delete query.project_id
+  await router.replace({ query })
+}
+
 async function updateStatus(item: DataRecord, status: unknown) {
   if (typeof status !== 'string') return
   const form = new FormData(); form.set('action', 'change_status'); form.set('status', status)
@@ -77,14 +124,20 @@ async function updateStatus(item: DataRecord, status: unknown) {
   await load()
 }
 
-onMounted(async () => { hydrateQuery(); if (!session.ready) await session.load(); await load() })
+async function switchToQueryProject() {
+  const projectId = Number(route.query.project_id || 0)
+  if (!projectId) return
+  if (Number(session.currentProject?.id || 0) !== projectId) await session.switchProject(projectId)
+}
+
+onMounted(async () => { hydrateQuery(); if (!session.ready) await session.load(); await switchToQueryProject(); await load() })
 </script>
 
 <template>
   <div class="page-stack">
     <PageHeader title="Bug 列表" description="集中查看、筛选和流转当前项目的缺陷">
       <a-button @click="load"><IconRefresh />刷新</a-button>
-      <a-button type="primary" @click="modalVisible = true"><IconPlus />新建 Bug</a-button>
+      <a-button type="primary" @click="openCreateBug()"><IconPlus />新建 Bug</a-button>
     </PageHeader>
     <div class="metric-row">
       <div class="metric"><div class="metric-label">全部</div><div class="metric-value">{{ data.summary.total || 0 }}</div></div>
@@ -102,16 +155,34 @@ onMounted(async () => { hydrateQuery(); if (!session.ready) await session.load()
         <a-button type="primary" @click="search"><IconSearch />查询</a-button>
       </div>
       <a-table :columns="columns" :data="data.page.items" :loading="loading" :pagination="false" row-key="id" :scroll="{ x: 1160 }" stripe>
-        <template #bugNo="{ record }"><a-link class="table-link" @click="openDetail(Number(record.id))">{{ record.bug_no }}</a-link></template>
-        <template #title="{ record }"><a-link class="table-link" @click="openDetail(Number(record.id))">{{ record.title }}</a-link></template>
+        <template #bugNo="{ record }">
+          <a-link class="bug-list-link" :title="record.bug_no" @click="openDetail(Number(record.id))">{{ record.bug_no }}</a-link>
+        </template>
+        <template #title="{ record }">
+          <a-link class="bug-list-link bug-title-link" :title="record.title" @click="openDetail(Number(record.id))">{{ record.title }}</a-link>
+        </template>
         <template #severity="{ record }"><a-tag :color="record.severity === '最高' ? 'red' : record.severity === '高' ? 'orangered' : 'gray'">{{ record.severity }}</a-tag></template>
         <template #status="{ record }">
-          <a-select :model-value="record.status" size="small" @change="(value) => updateStatus(record, value)"><a-option v-for="item in session.options.statuses" :key="item.value" :value="item.value"><StatusTag :status="item.value" /></a-option></a-select>
+          <StatusSelect :model-value="record.status" :options="session.options.statuses" size="small" @change="(value) => updateStatus(record, value)" />
         </template>
       </a-table>
       <a-pagination :current="data.page.page" :total="data.page.total" :page-size="20" show-total @change="changePage" />
     </section>
-    <BugFormModal v-model:visible="modalVisible" :users="data.users" :requirements="data.requirements" :cases="data.cases" :default-version="filters.version[0] || ''" @saved="load" />
+    <BugFormModal v-model:visible="modalVisible" :users="data.users" :requirements="data.requirements" :cases="data.cases" :default-version="filters.version[0] || ''" :initial-values="bugInitialValues" @saved="load" />
     <BugDetailDrawer v-model:visible="detailVisible" :bug-id="selectedBugId" @changed="load" @deleted="load" />
   </div>
 </template>
+
+<style scoped>
+.bug-list-link {
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-1);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bug-list-link:hover { color: var(--color-text-1); }
+.bug-title-link { width: 100%; }
+</style>

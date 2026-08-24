@@ -8893,11 +8893,47 @@ def create_app(test_config: dict | None = None) -> Flask:
         bundle = fetch_case_document_bundle(document_id)
         if bundle is None:
             return jsonify({"ok": False, "message": "未找到对应的在线文档。"}), 404
-        return jsonify({"ok": True, "data": api_json_value(bundle)})
+        payload = api_json_value(bundle)
+        payload["can_manage"] = can_manage_case_document(bundle["document"])
+        return jsonify({"ok": True, "data": payload})
 
     @app.post("/api/v1/cases/<int:document_id>/autosave")
     def api_case_autosave(document_id: int) -> Response | tuple[Response, int]:
         return autosave_case_document(document_id)
+
+    @app.post("/api/v1/cases/<int:document_id>/items/<int:case_id>/delete")
+    def api_delete_case_item(document_id: int, case_id: int) -> tuple[Response, int] | Response:
+        bundle = fetch_case_document_bundle(document_id)
+        if bundle is None:
+            return jsonify({"ok": False, "message": "未找到对应的在线文档。"}), 404
+        if not can_manage_case_document(bundle["document"]):
+            return jsonify({"ok": False, "message": "仅管理员或文档创建人可删除用例。"}), 403
+        case_item = fetch_case(case_id)
+        if case_item is None:
+            return jsonify({"ok": False, "message": "未找到对应的用例。"}), 404
+        same_document = (
+            int(case_item["project_id"] or 0) == int(bundle["document"]["project_id"] or 0)
+            and str(case_item["version"] or "") == str(bundle["document"]["version"] or "")
+            and str(case_item["folder_name"] or "") == str(bundle["document"]["folder_name"] or "")
+            and str(case_item["doc_name"] or "") == str(bundle["document"]["doc_name"] or "")
+        )
+        if not same_document:
+            return jsonify({"ok": False, "message": "当前用例不属于这个在线文档。"}), 400
+        deleted, next_document_id, version = delete_case_item(case_id)
+        if deleted <= 0:
+            return jsonify({"ok": False, "message": "用例删除失败。"}), 400
+        return jsonify(
+            {
+                "ok": True,
+                "message": "用例已删除。",
+                "data": {
+                    "deleted": deleted,
+                    "next_document_id": next_document_id,
+                    "version": version,
+                    "document_removed": case_id == document_id and next_document_id is None,
+                },
+            }
+        )
 
     @app.post("/api/v1/cases/manage")
     def api_manage_cases() -> Response | tuple[Response, int]:

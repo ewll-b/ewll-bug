@@ -8,7 +8,6 @@ import { useSessionStore } from '../stores/session'
 import PageHeader from '../components/PageHeader.vue'
 import BugDetailDrawer from '../components/BugDetailDrawer.vue'
 import RequirementDetailDrawer from '../components/RequirementDetailDrawer.vue'
-import CaseDocumentDrawer from '../components/CaseDocumentDrawer.vue'
 
 const router = useRouter()
 const session = useSessionStore()
@@ -17,7 +16,6 @@ const state = ref('')
 const data = ref<DataRecord>({ items: [], unread_count: 0, total_count: 0 })
 const bugId = ref<number>(); const bugVisible = ref(false)
 const requirementId = ref<number>(); const requirementVisible = ref(false)
-const documentId = ref<number>(); const documentVisible = ref(false)
 async function load() { loading.value = true; try { data.value = await api.notifications(state.value) } finally { loading.value = false } }
 async function readAll() {
   const result = await api.readAllNotifications()
@@ -33,7 +31,7 @@ async function open(item: DataRecord) {
   const documentMatch = path.match(/^\/cases\/(\d+)/)
   if (bugMatch) { bugId.value = Number(bugMatch[1]); bugVisible.value = true }
   else if (requirementMatch) { requirementId.value = Number(requirementMatch[1]); requirementVisible.value = true }
-  else if (documentMatch) { documentId.value = Number(documentMatch[1]); documentVisible.value = true }
+  else if (documentMatch) await router.push(path)
   else await router.push(path)
   await Promise.all([load(), session.refreshSummary()])
 }
@@ -61,7 +59,6 @@ onMounted(load)
     </section>
     <BugDetailDrawer v-model:visible="bugVisible" :bug-id="bugId" @changed="load" @deleted="load" />
     <RequirementDetailDrawer v-model:visible="requirementVisible" :requirement-id="requirementId" @changed="load" @deleted="load" />
-    <CaseDocumentDrawer v-model:visible="documentVisible" :document-id="documentId" />
   </div>
 </template>
 
