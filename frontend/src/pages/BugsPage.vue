@@ -51,6 +51,14 @@ async function load() {
   } finally { loading.value = false }
 }
 
+async function syncQueryAndLoad() {
+  // 统一同步当前筛选和页码，避免翻页时被查询逻辑重置。
+  const query: DataRecord = {}
+  Object.entries(filters).forEach(([key, value]) => { if (Array.isArray(value) ? value.length : value) query[key] = value })
+  await router.replace({ query })
+  await load()
+}
+
 async function search() {
   if (Array.isArray(filters.createdRange) && filters.createdRange.length === 2) {
     filters.created_from = filters.createdRange[0]
@@ -60,15 +68,12 @@ async function search() {
     filters.created_to = ''
   }
   filters.page = 1
-  const query: DataRecord = {}
-  Object.entries(filters).forEach(([key, value]) => { if (Array.isArray(value) ? value.length : value) query[key] = value })
-  await router.replace({ query })
-  await load()
+  await syncQueryAndLoad()
 }
 
 async function changePage(page: number) {
   filters.page = page
-  await search()
+  await syncQueryAndLoad()
 }
 
 function openDetail(id: number) { selectedBugId.value = id; detailVisible.value = true }
