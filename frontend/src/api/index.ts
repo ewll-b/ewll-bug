@@ -6,6 +6,7 @@ export const api = {
   login: (payload: { username: string; password: string }) => apiPost<DataRecord>('/auth/login', payload),
   logout: () => apiPost('/auth/logout'),
   bootstrap: () => apiGet<DataRecord>('/bootstrap'),
+  summary: () => apiGet<DataRecord>('/summary'),
   switchProject: (projectId: number) => apiPost('/projects/current', { project_id: projectId }),
   bugs: (params?: DataRecord) => apiGet<DataRecord>('/bugs', params),
   bug: (id: number) => apiGet<DataRecord>(`/bugs/${id}`),

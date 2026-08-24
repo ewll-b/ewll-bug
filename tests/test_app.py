@@ -267,6 +267,16 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertTrue(payload["data"]["projects"])
         self.assertNotIn("password", payload["data"]["user"])
 
+    def test_v1_api_summary_returns_navigation_counts(self) -> None:
+        self.login_as("lit", "123456")
+
+        response = self.client.get("/api/v1/summary")
+        summary = response.get_json()["data"]["summary"]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(summary["my_todo_count"], int)
+        self.assertIsInstance(summary["notification_unread_count"], int)
+
     def test_v1_api_bug_list_and_detail(self) -> None:
         self.login_as("lit", "123456")
 

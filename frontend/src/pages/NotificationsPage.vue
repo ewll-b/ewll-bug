@@ -4,12 +4,14 @@ import { useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { IconCheck, IconNotification } from '@arco-design/web-vue/es/icon'
 import { api, type DataRecord } from '../api'
+import { useSessionStore } from '../stores/session'
 import PageHeader from '../components/PageHeader.vue'
 import BugDetailDrawer from '../components/BugDetailDrawer.vue'
 import RequirementDetailDrawer from '../components/RequirementDetailDrawer.vue'
 import CaseDocumentDrawer from '../components/CaseDocumentDrawer.vue'
 
 const router = useRouter()
+const session = useSessionStore()
 const loading = ref(false)
 const state = ref('')
 const data = ref<DataRecord>({ items: [], unread_count: 0, total_count: 0 })
@@ -17,7 +19,11 @@ const bugId = ref<number>(); const bugVisible = ref(false)
 const requirementId = ref<number>(); const requirementVisible = ref(false)
 const documentId = ref<number>(); const documentVisible = ref(false)
 async function load() { loading.value = true; try { data.value = await api.notifications(state.value) } finally { loading.value = false } }
-async function readAll() { const result = await api.readAllNotifications(); Message.success(result.message || '已全部标记为已读'); await load() }
+async function readAll() {
+  const result = await api.readAllNotifications()
+  Message.success(result.message || '已全部标记为已读')
+  await Promise.all([load(), session.refreshSummary()])
+}
 async function open(item: DataRecord) {
   const result = await api.readNotification(Number(item.id)); const link = result.data?.link_path || item.link_path || '/notifications'
   const path = String(link).replace(/^\/for-test/, '')
@@ -29,7 +35,7 @@ async function open(item: DataRecord) {
   else if (requirementMatch) { requirementId.value = Number(requirementMatch[1]); requirementVisible.value = true }
   else if (documentMatch) { documentId.value = Number(documentMatch[1]); documentVisible.value = true }
   else await router.push(path)
-  await load()
+  await Promise.all([load(), session.refreshSummary()])
 }
 onMounted(load)
 </script>
@@ -42,7 +48,12 @@ onMounted(load)
       <a-list :loading="loading" :data="data.items" :bordered="false">
         <template #item="{ item }">
           <a-list-item action-layout="vertical" class="notification-item" @click="open(item)">
-            <a-list-item-meta :title="item.title" :description="item.body"><template #avatar><a-badge :dot="!item.is_read"><a-avatar><IconNotification /></a-avatar></a-badge></template></a-list-item-meta>
+            <a-list-item-meta :title="item.title" :description="item.body">
+              <template #avatar>
+                <a-badge v-if="!item.is_read" dot :count="1"><a-avatar><IconNotification /></a-avatar></a-badge>
+                <a-avatar v-else><IconNotification /></a-avatar>
+              </template>
+            </a-list-item-meta>
             <template #actions><span>{{ item.created_at }}</span><a-tag>{{ item.category }}</a-tag></template>
           </a-list-item>
         </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import {
@@ -9,6 +9,7 @@ import {
 } from '@arco-design/web-vue/es/icon'
 import { api } from '../api'
 import { useSessionStore } from '../stores/session'
+import { normalizeBadgeCount } from '../utils/badge'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,13 +28,13 @@ const selectedKey = computed(() => {
 })
 
 const menuItems = computed(() => [
-  { key: '/bugs', label: 'Bug 列表', icon: IconBug },
-  { key: '/todos', label: '我的待办', icon: IconCheckCircle, badge: session.summary.my_todo_count },
-  { key: '/notifications', label: '消息中心', icon: IconNotification, badge: session.summary.notification_unread_count },
-  { key: '/cases', label: '用例库', icon: IconFolder },
-  { key: '/requirements', label: '需求管理', icon: IconCalendar },
-  { key: '/reports/testing', label: '测试报告', icon: IconDashboard },
-  ...(session.isAdmin ? [{ key: '/admin', label: '系统管理', icon: IconSettings }] : []),
+  { key: '/bugs', label: 'Bug 列表', icon: IconBug, badge: 0 },
+  { key: '/todos', label: '我的待办', icon: IconCheckCircle, badge: normalizeBadgeCount(session.summary.my_todo_count) },
+  { key: '/notifications', label: '消息中心', icon: IconNotification, badge: normalizeBadgeCount(session.summary.notification_unread_count) },
+  { key: '/cases', label: '用例库', icon: IconFolder, badge: 0 },
+  { key: '/requirements', label: '需求管理', icon: IconCalendar, badge: 0 },
+  { key: '/reports/testing', label: '测试报告', icon: IconDashboard, badge: 0 },
+  ...(session.isAdmin ? [{ key: '/admin', label: '系统管理', icon: IconSettings, badge: 0 }] : []),
 ])
 
 async function navigate(key: string) {
@@ -58,7 +59,10 @@ onMounted(async () => {
   // 异步路由初始化期间登录页可能短暂创建壳层，此时不请求受保护数据。
   if (route.path === '/login' || route.meta.public === true) return
   if (!session.ready) await session.load()
+  session.startSummaryAutoRefresh()
 })
+
+onBeforeUnmount(() => session.stopSummaryAutoRefresh())
 </script>
 
 <template>
@@ -70,8 +74,6 @@ onMounted(async () => {
         </a-button>
         <img class="brand-logo" :src="logoUrl" alt="Alvin's Club" />
         <span class="brand-name">Bug Management</span>
-      </div>
-      <div class="header-actions">
         <a-select
           class="project-select"
           :model-value="session.currentProject?.id"
@@ -80,6 +82,8 @@ onMounted(async () => {
         >
           <a-option v-for="item in session.projects" :key="item.id" :value="item.id">{{ item.name }}</a-option>
         </a-select>
+      </div>
+      <div class="header-actions">
         <a-tooltip :content="session.isDark ? '切换白天模式' : '切换黑夜模式'">
           <a-button type="text" shape="circle" aria-label="切换主题" @click="session.toggleTheme">
             <IconSun v-if="session.isDark" />
@@ -104,7 +108,7 @@ onMounted(async () => {
           <a-menu-item v-for="item in menuItems" :key="item.key">
             <template #icon><component :is="item.icon" /></template>
             <span>{{ item.label }}</span>
-            <a-badge v-if="item.badge" :count="item.badge" :max-count="99" />
+            <a-badge v-if="item.badge > 0" :count="item.badge" :max-count="99" />
           </a-menu-item>
         </a-menu>
         <a-button class="collapse-button" type="text" shape="circle" :aria-label="collapsed ? '展开导航' : '收起导航'" @click="collapsed = !collapsed">
@@ -120,7 +124,8 @@ onMounted(async () => {
       <a-menu :selected-keys="[selectedKey]" @menu-item-click="navigate">
         <a-menu-item v-for="item in menuItems" :key="item.key">
           <template #icon><component :is="item.icon" /></template>
-          {{ item.label }}
+          <span>{{ item.label }}</span>
+          <a-badge v-if="item.badge > 0" :count="item.badge" :max-count="99" />
         </a-menu-item>
       </a-menu>
     </a-drawer>

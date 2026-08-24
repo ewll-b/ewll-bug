@@ -8748,6 +8748,11 @@ def create_app(test_config: dict | None = None) -> Flask:
             }
         )
 
+    @app.get("/api/v1/summary")
+    def api_summary() -> Response:
+        # 顶部导航定时刷新时只返回角标所需摘要，避免重复加载完整初始化数据。
+        return jsonify({"ok": True, "data": {"summary": api_json_value(fetch_summary())}})
+
     @app.post("/api/v1/projects/current")
     def api_switch_project() -> tuple[Response, int] | Response:
         payload = request.get_json(silent=True) if request.is_json else request.form

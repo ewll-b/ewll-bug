@@ -22,7 +22,15 @@ const columns = [
   { title: '状态', dataIndex: 'status', slotName: 'status', width: 150 },
   { title: '更新时间', dataIndex: 'updated_at', width: 170 },
 ]
-async function load() { loading.value = true; try { items.value = (await api.todos()).items || [] } finally { loading.value = false } }
+async function load() {
+  loading.value = true
+  try {
+    items.value = (await api.todos()).items || []
+    if (session.ready) await session.refreshSummary()
+  } finally {
+    loading.value = false
+  }
+}
 async function updateStatus(item: DataRecord, status: unknown) {
   if (typeof status !== 'string') return
   const form = new FormData(); form.set('action', 'change_status'); form.set('status', status)
