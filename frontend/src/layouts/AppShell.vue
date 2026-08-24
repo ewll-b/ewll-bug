@@ -74,6 +74,8 @@ onBeforeUnmount(() => session.stopSummaryAutoRefresh())
         </a-button>
         <img class="brand-logo" :src="logoUrl" alt="Alvin's Club" />
         <span class="brand-name">Bug Management</span>
+      </div>
+      <div class="header-actions">
         <a-select
           class="project-select"
           :model-value="session.currentProject?.id"
@@ -82,8 +84,6 @@ onBeforeUnmount(() => session.stopSummaryAutoRefresh())
         >
           <a-option v-for="item in session.projects" :key="item.id" :value="item.id">{{ item.name }}</a-option>
         </a-select>
-      </div>
-      <div class="header-actions">
         <a-tooltip :content="session.isDark ? '切换白天模式' : '切换黑夜模式'">
           <a-button type="text" shape="circle" aria-label="切换主题" @click="session.toggleTheme">
             <IconSun v-if="session.isDark" />
