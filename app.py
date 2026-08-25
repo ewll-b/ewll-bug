@@ -3912,6 +3912,36 @@ def create_app(test_config: dict | None = None) -> Flask:
         except (TypeError, ValueError):
             return default
 
+    def fetch_bug_rows(filters: dict, limit: int | None = None, offset: int = 0) -> list[sqlite3.Row]:
+        pagination_sql = ""
+        query_params: list[object]
+        where_sql, params = build_bug_where(filters)
+        query_params = [*params]
+        if limit is not None:
+            pagination_sql = "LIMIT ? OFFSET ?"
+            query_params.extend([limit, offset])
+        return get_db().execute(
+            f"""
+            SELECT
+                bugs.*,
+                projects.name AS project_name,
+                creator.name AS creator_name,
+                assignee.name AS assignee_name,
+                requirements.code AS requirement_code,
+                test_cases.case_no AS case_no
+            FROM bugs
+            JOIN projects ON bugs.project_id = projects.id
+            LEFT JOIN users creator ON bugs.creator_id = creator.id
+            LEFT JOIN users assignee ON bugs.assignee_id = assignee.id
+            LEFT JOIN requirements ON bugs.requirement_id = requirements.id
+            LEFT JOIN test_cases ON bugs.case_id = test_cases.id
+            WHERE {where_sql}
+            ORDER BY bugs.created_at DESC, bugs.id DESC
+            {pagination_sql}
+            """,
+            query_params,
+        ).fetchall()
+
     def fetch_bug_page(filters: dict, page: int) -> dict:
         db = get_db()
         where_sql, params = build_bug_where(filters)
@@ -3929,27 +3959,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         pages = max(1, math.ceil(total / page_size)) if total else 1
         page = max(1, min(page, pages))
         offset = (page - 1) * page_size
-        items = db.execute(
-            f"""
-            SELECT
-                bugs.*,
-                projects.name AS project_name,
-                creator.name AS creator_name,
-                assignee.name AS assignee_name,
-                requirements.code AS requirement_code,
-                test_cases.case_no AS case_no
-            FROM bugs
-            JOIN projects ON bugs.project_id = projects.id
-            LEFT JOIN users creator ON bugs.creator_id = creator.id
-            LEFT JOIN users assignee ON bugs.assignee_id = assignee.id
-            LEFT JOIN requirements ON bugs.requirement_id = requirements.id
-            LEFT JOIN test_cases ON bugs.case_id = test_cases.id
-            WHERE {where_sql}
-            ORDER BY bugs.created_at DESC, bugs.id DESC
-            LIMIT ? OFFSET ?
-            """,
-            params + [page_size, offset],
-        ).fetchall()
+        items = fetch_bug_rows(filters, limit=page_size, offset=offset)
         return {
             "items": items,
             "total": total,
@@ -6669,20 +6679,22 @@ def create_app(test_config: dict | None = None) -> Flask:
             query["version"] = version
         return url_for("testing_report", **query)
 
-    def fetch_report_data(version: str = "", page: int = 1) -> dict:
+    def fetch_report_data(version: str = "", page: int = 1, include_all_bugs: bool = False) -> dict:
         project = fetch_current_project()
         report_filters = {"version": version} if version else {}
         report_bug_page = fetch_bug_page(report_filters, page)
+        report_bugs = fetch_bug_rows(report_filters) if include_all_bugs else report_bug_page["items"]
         return {
             "project": project,
             "case_total": count_test_cases(version=version),
             "distribution": execution_distribution(version=version),
             "summary": fetch_summary(version),
             "open_bug_platform_counts": fetch_open_bug_counts_by_platform(project_id=int(project["id"]) if project else None, version=version) if project else [],
-            "bugs": report_bug_page["items"],
+            "bugs": report_bugs,
             "bug_page": report_bug_page,
             "selected_version": version,
             "versions": fetch_report_versions(),
+            "generated_at": current_time(),
         }
 
     def is_admin() -> bool:
@@ -8294,7 +8306,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.route("/reports/testing/export")
     def export_testing_report() -> Response:
         version = request.args.get("version", "").strip()
-        report = fetch_report_data(version)
+        report = fetch_report_data(version, include_all_bugs=True)
         html = render_template("report_export.html", report=report)
         filename = f"testing-report-{app_now().strftime('%Y%m%d-%H%M')}.html"
         return Response(html, mimetype="text/html; charset=utf-8", headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'})

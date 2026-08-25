@@ -2859,9 +2859,71 @@ class BugPlatformTestCase(unittest.TestCase):
 
     def test_report_export(self) -> None:
         self.login_as("lit", "123456")
-        response = self.client.get("/reports/testing/export")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
+        version = "export-sync"
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            creator_id = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()[0]
+            assignee_id = conn.execute("SELECT id FROM users WHERE username = 'zhouyue'").fetchone()[0]
+            bug_rows = []
+            for index in range(1, 22):
+                created_at = f"2026-08-20 10:{index:02d}:00"
+                bug_rows.append(
+                    (
+                        f"EXP-{index:02d}",
+                        f"导出同步缺陷 {index:02d}",
+                        version,
+                        assignee_id,
+                        creator_id,
+                        created_at,
+                        created_at,
+                    )
+                )
+            conn.executemany(
+                """
+                INSERT INTO bugs (
+                    bug_no, title, version, module, platform, severity, priority, status,
+                    assignee_id, creator_id, reporter, environment, description,
+                    expected_result, actual_result, project_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 'WEB', 'WEB', '高', '高', 'open', ?, ?, '李婷', '测试环境',
+                        '导出报告真实数据', '报告展示', '模板同步', 1, ?, ?)
+                """,
+                bug_rows,
+            )
+            case_rows = [
+                (version, "EXPORT-TC-001", "导出统计通过用例", "通过"),
+                (version, "EXPORT-TC-002", "导出统计失败用例", "失败"),
+                (version, "EXPORT-TC-003", "导出统计未测用例", "未测"),
+            ]
+            conn.executemany(
+                """
+                INSERT INTO test_cases (
+                    project_id, version, folder_name, doc_name, case_no, title, priority_level,
+                    module_name, steps, expected_result, actual_result, source_type, execute_status,
+                    creator_id, created_at, updated_at
+                )
+                VALUES (1, ?, '导出报告', '导出报告模板', ?, ?, 'P1', '报告模块',
+                        '执行步骤', '预期结果', '实际结果', '在线文档', ?, ?, '2026-08-20 09:00:00',
+                        '2026-08-20 09:00:00')
+                """,
+                [(row[0], row[1], row[2], row[3], creator_id) for row in case_rows],
+            )
+            conn.commit()
+
+        response = self.client.get(f"/reports/testing/export?version={version}")
+        html = response.data.decode("utf-8")
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment;", response.headers.get("Content-Disposition", ""))
+        self.assertIn(f"版本：{version}", html)
+        self.assertIn("用例总数：3", html)
+        self.assertIn("共 21 条缺陷", html)
+        self.assertIn("导出 21 条", html)
+        self.assertIn("导出同步缺陷 01", html)
+        self.assertIn("导出同步缺陷 21", html)
+        self.assertIn("33.33%", html)
+        self.assertIn("WEB", html)
+        self.assertIn("已打开", html)
 
 
 if __name__ == "__main__":
