@@ -91,6 +91,7 @@ BUG_INLINE_ATTACHMENT_FIELDS = (
 REPORT_PLATFORM_LABELS = {
     "iOS": "IOS",
 }
+VERSION_TOKEN_PATTERN = re.compile(r"(?<!\d)(\d+(?:\.\d+){1,3})(?!\d)")
 BUG_PRIORITY_OPTIONS = BUG_SEVERITY_OPTIONS.copy()
 BUG_MULTI_FILTER_KEYS = ("version", "platform", "creator_id", "assignee_id", "status")
 COMMENT_NOTIFICATION_CATEGORIES = ("bug_comment", "comment_mention")
@@ -476,6 +477,11 @@ def create_app(test_config: dict | None = None) -> Flask:
         if text.isdigit():
             return text.zfill(3)
         return text
+
+    def extract_version_token(value: object) -> str:
+        text = normalize_excel_text(value)
+        match = VERSION_TOKEN_PATTERN.search(text)
+        return match.group(1) if match else ""
 
     def get_db() -> sqlite3.Connection:
         if "db" not in g:
@@ -4284,13 +4290,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     def infer_case_version(case_no: str, version: str = "") -> str:
         version_text = normalize_excel_text(version)
         if version_text:
-            return version_text
+            return extract_version_token(version_text) or version_text
         case_no_text = normalize_excel_text(case_no)
-        if "-" in case_no_text:
-            prefix = case_no_text.split("-", 1)[0].strip()
-            if "." in prefix:
-                return prefix
-        return ""
+        return extract_version_token(case_no_text)
 
     def normalize_case_execute_status(raw_status: str) -> tuple[str, str, str, str]:
         text = normalize_excel_text(raw_status).replace(" ", "").lower()
@@ -5522,22 +5524,56 @@ def create_app(test_config: dict | None = None) -> Flask:
             (current_project_id(),),
         ).fetchall()
 
+    def append_case_report_version_clause(where_clauses: list[str], params: list[object], version: str) -> None:
+        version_text = str(version or "").strip()
+        if not version_text:
+            return
+        version_like = f"%{version_text}%"
+        where_clauses.append(
+            """
+            (
+                COALESCE(version, '') = ?
+                OR (
+                    COALESCE(version, '') = ''
+                    AND (
+                        COALESCE(case_no, '') LIKE ?
+                        OR COALESCE(folder_name, '') LIKE ?
+                        OR COALESCE(doc_name, '') LIKE ?
+                    )
+                )
+            )
+            """
+        )
+        params.extend([version_text, version_like, version_like, version_like])
+
+    def build_case_report_where(
+        project_id: int | None = None,
+        version: str | None = None,
+        folder_name: str | None = None,
+        doc_name: str | None = None,
+    ) -> tuple[str, list[object]]:
+        target_project_id = project_id or current_project_id()
+        params: list[object] = [target_project_id]
+        where_clauses = ["project_id = ?"]
+        append_case_report_version_clause(where_clauses, params, str(version or ""))
+        if doc_name is not None:
+            where_clauses.append("COALESCE(folder_name, '') = COALESCE(?, '')")
+            where_clauses.append("COALESCE(doc_name, '') = COALESCE(?, '')")
+            params.extend([folder_name, doc_name])
+        return " AND ".join(where_clauses), params
+
     def count_test_cases(version: str = "", project_id: int | None = None) -> int:
         target_project_id = project_id or current_project_id()
         if target_project_id is None:
             return 0
-        params: list[object] = [target_project_id]
-        version_sql = ""
-        if version:
-            version_sql = " AND COALESCE(version, '') = ?"
-            params.append(version)
+        where_sql, params = build_case_report_where(project_id=target_project_id, version=version)
         return int(
             get_db()
             .execute(
                 f"""
                 SELECT COUNT(*) AS count
                 FROM test_cases
-                WHERE project_id = ?{version_sql}
+                WHERE {where_sql}
                 """,
                 params,
             )
@@ -6601,20 +6637,17 @@ def create_app(test_config: dict | None = None) -> Flask:
         doc_name: str | None = None,
     ) -> list[dict]:
         target_project_id = project_id or current_project_id()
-        params: list[object] = [target_project_id]
-        where_clauses = ["project_id = ?"]
-        if version is not None and str(version).strip():
-            where_clauses.append("COALESCE(version, '') = COALESCE(?, '')")
-            params.append(str(version).strip())
-        if doc_name is not None:
-            where_clauses.append("COALESCE(folder_name, '') = COALESCE(?, '')")
-            where_clauses.append("COALESCE(doc_name, '') = COALESCE(?, '')")
-            params.extend([folder_name, doc_name])
+        where_sql, params = build_case_report_where(
+            project_id=target_project_id,
+            version=version,
+            folder_name=folder_name,
+            doc_name=doc_name,
+        )
         rows = get_db().execute(
             f"""
             SELECT execute_status, COUNT(*) AS count
             FROM test_cases
-            WHERE {' AND '.join(where_clauses)}
+            WHERE {where_sql}
             GROUP BY execute_status
             """,
             params,
@@ -7291,7 +7324,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         now = current_time()
         imported = 0
         default_doc_name = Path(file.filename).stem
-        default_version = default_doc_name.split("-")[0] if "-" in default_doc_name else ""
+        default_version = extract_version_token(default_doc_name)
         creator_id = int(g.current_user["id"]) if g.current_user is not None else None
         workbook_sheets = [sheet for sheet in workbook.worksheets if sheet.max_row > 0 and sheet.max_column > 0]
         multi_sheet_mode = len(workbook_sheets) > 1
@@ -7324,6 +7357,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             seen_case_nos: set[str] = set()
             sheet_imported_count = 0
             sheet_doc_name = default_doc_name if not multi_sheet_mode else f"{default_doc_name} / {sheet.title}"
+            sheet_version = extract_version_token(sheet.title) or default_version
             sheet_image_cells = collect_sheet_image_cells(sheet)
 
             def insert_case_row(
@@ -7360,7 +7394,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     """,
                     (
                         project_id,
-                        version or default_version,
+                        version or sheet_version,
                         folder_name,
                         sheet_doc_name,
                         case_no,
@@ -7422,7 +7456,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     actual_result = mapped_text_with_images("actual_result")
                     remark = mapped_text_with_images("remark")
                     executor = mapped_text("executor")
-                    version = infer_case_version(case_no, mapped_text("version")) or default_version
+                    version = infer_case_version(case_no, mapped_text("version")) or sheet_version
                     mapped_image_count = sum(
                         count_excel_images_in_cell(sheet_image_cells, row_index, header_mapping.get(field_name))
                         for field_name in ("steps", "expected_result", "actual_result", "remark")
@@ -7532,7 +7566,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
                 insert_case_row(
                     case_no=case_no,
-                    version=infer_case_version(case_no, default_version),
+                    version=infer_case_version(case_no, sheet_version),
                     title=title or case_no,
                     priority_level=priority_level,
                     module_name=module_name,

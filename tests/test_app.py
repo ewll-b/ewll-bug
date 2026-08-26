@@ -1579,6 +1579,38 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("已同步".encode("utf-8"), response.data)
 
+    def test_case_upload_infers_version_from_filename_without_dash(self) -> None:
+        self.login_as("lit", "123456")
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.append(["测试编号", "测试步骤", "预期结果", "执行结果"])
+        sheet.append(["TC-999", "打开日报页面", "展示真实用例统计", "通过"])
+        excel = io.BytesIO()
+        workbook.save(excel)
+        excel.seek(0)
+        response = self.client.post(
+            "/cases/upload",
+            data={"excel_file": (excel, "2.5.1_功能测试用例.xlsx"), "folder_name": "测试组"},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("已同步".encode("utf-8"), response.data)
+
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT version, doc_name
+                FROM test_cases
+                WHERE case_no = ?
+                """,
+                ("TC-999",),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["version"], "2.5.1")
+        self.assertEqual(row["doc_name"], "2.5.1_功能测试用例")
+
     def test_case_upload_uses_selected_folder(self) -> None:
         self.login_as("lit", "123456")
         excel = self.build_standard_case_excel_file()
@@ -2924,6 +2956,38 @@ class BugPlatformTestCase(unittest.TestCase):
         self.assertIn("33.33%", html)
         self.assertIn("WEB", html)
         self.assertIn("已打开", html)
+
+    def test_report_export_counts_legacy_unversioned_cases_by_doc_name(self) -> None:
+        self.login_as("lit", "123456")
+        with self.client.session_transaction() as session:
+            session["project_id"] = 1
+        version = "2.5.1"
+        with sqlite3.connect(self.app.config["DATABASE"]) as conn:
+            creator_id = conn.execute("SELECT id FROM users WHERE username = 'lit'").fetchone()[0]
+            conn.executemany(
+                """
+                INSERT INTO test_cases (
+                    project_id, version, folder_name, doc_name, case_no, title, priority_level,
+                    module_name, steps, expected_result, actual_result, source_type, execute_status,
+                    creator_id, created_at, updated_at
+                )
+                VALUES (1, '', '历史导入', '2.5.1_功能测试用例', ?, ?, 'P1', '报告模块',
+                        '执行步骤', '预期结果', '实际结果', 'Excel上传', ?, ?, '2026-08-26 09:00:00',
+                        '2026-08-26 09:00:00')
+                """,
+                [
+                    ("LEGACY-TC-001", "历史空版本通过用例", "通过", creator_id),
+                    ("LEGACY-TC-002", "历史空版本失败用例", "失败", creator_id),
+                ],
+            )
+            conn.commit()
+
+        response = self.client.get(f"/reports/testing/export?version={version}")
+        html = response.data.decode("utf-8")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f"版本：{version}", html)
+        self.assertIn("用例总数：2", html)
+        self.assertIn("50.00%", html)
 
 
 if __name__ == "__main__":
